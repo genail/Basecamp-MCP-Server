@@ -642,8 +642,197 @@ class BasecampSearch:
             logger.error(f"Error searching uploads: {str(e)}")
             return []
 
+    def _truncate_text(self, text, max_length=150):
+        """Truncate text to max_length characters, adding ellipsis if truncated."""
+        if not text:
+            return text
+        text_str = str(text)
+        if len(text_str) <= max_length:
+            return text_str
+        return text_str[:max_length] + "..."
+
+    def _summarize_result(self, result):
+        """
+        Create a concise summary of a search result.
+
+        Returns only essential fields with truncated content to reduce token usage.
+        Users can fetch full details using the provided URLs or IDs.
+        """
+        summary = {
+            "id": result.get("id"),
+            "type": result.get("type"),
+            "title": self._truncate_text(result.get("title"), 100),
+        }
+
+        # Add project/bucket info if available
+        if result.get("bucket"):
+            summary["project"] = {
+                "id": result["bucket"].get("id"),
+                "name": result["bucket"].get("name")
+            }
+
+        # Add truncated content preview
+        content_field = None
+        if result.get("plain_text_content"):
+            content_field = "plain_text_content"
+        elif result.get("content"):
+            content_field = "content"
+        elif result.get("description"):
+            content_field = "description"
+
+        if content_field:
+            summary["preview"] = self._truncate_text(result.get(content_field), 200)
+
+        # Add URLs for accessing full content
+        if result.get("url"):
+            summary["api_url"] = result["url"]
+        if result.get("app_url"):
+            summary["web_url"] = result["app_url"]
+
+        # Add parent info if available (for comments, nested items)
+        if result.get("parent"):
+            summary["parent"] = {
+                "id": result["parent"].get("id"),
+                "title": self._truncate_text(result["parent"].get("title"), 50),
+                "type": result["parent"].get("type")
+            }
+
+        # Add creator name only (not full details)
+        if result.get("creator"):
+            summary["creator"] = result["creator"].get("name")
+
+        # Add dates
+        if result.get("created_at"):
+            summary["created_at"] = result["created_at"]
+
+        return summary
+
+    def native_search(self, query, page=1, max_results=16):
+        """
+        Use Basecamp's native search API to search across all content types.
+
+        This method uses the account-level search endpoint which searches:
+        - Comments
+        - Messages
+        - Todos
+        - Cards
+        - Documents
+        - Uploads
+        - Campfire lines
+        - And more...
+
+        Args:
+            query (str): Search query string
+            page (int, optional): Starting page number (default: 1, 1-based for human-friendliness)
+            max_results (int, optional): Maximum number of results to return (default: 16, hard limit: 16)
+
+        Returns:
+            dict: Contains summarized 'results' list with pagination info.
+                  Each result includes id, type, title, preview, and URLs to fetch full details.
+        """
+        try:
+            # Hard limit: max_results cannot exceed 16
+            HARD_LIMIT = 16
+            requested_results = max_results
+            warning = None
+
+            if max_results > HARD_LIMIT:
+                warning = f"Requested {max_results} results, but limited to maximum of {HARD_LIMIT} per page to prevent excessive token usage."
+                max_results = HARD_LIMIT
+                logger.warning(warning)
+
+            all_results = []
+            current_api_page = page
+
+            # Fetch results until we have enough for the requested page
+            while True:
+                logger.info(f"Fetching search results page {current_api_page} for query: {query}")
+                search_data = self.client.search(query, page=current_api_page)
+
+                # Add results from this page
+                page_results = search_data.get('results', [])
+                all_results.extend(page_results)
+
+                logger.info(f"Got {len(page_results)} results from page {current_api_page}")
+
+                # Check if we've reached max_results limit
+                if len(all_results) >= max_results:
+                    logger.info(f"Reached max_results limit of {max_results}")
+                    all_results = all_results[:max_results]
+                    break
+
+                # Check if we should continue pagination
+                has_next = search_data.get('has_next_page', False)
+                if not has_next:
+                    break
+
+                current_api_page = search_data.get('next_page', current_api_page + 1)
+
+            # Summarize results to reduce token usage
+            summarized_results = [self._summarize_result(r) for r in all_results]
+
+            # Calculate pagination info
+            actual_result_count = len(summarized_results)
+
+            # For total_results, we need to fetch more to know the actual total
+            # For now, we estimate based on whether there are more pages
+            has_more_results = search_data.get('has_next_page', False) or len(all_results) == max_results
+
+            # Calculate showing range
+            start_idx = 1
+            end_idx = actual_result_count
+            showing_results = f"{start_idx}-{end_idx}" if actual_result_count > 0 else "0"
+
+            # Build pagination object
+            pagination = {
+                "current_page": page,
+                "results_per_page": HARD_LIMIT,
+                "showing_results": showing_results,
+                "total_results": actual_result_count,  # Results on this page
+                "has_more": has_more_results
+            }
+
+            # Only calculate total_pages if we know there are more results
+            if has_more_results:
+                # We can't know exact total without fetching all, so we indicate there are more
+                pagination["total_pages"] = "unknown (more pages available)"
+            else:
+                pagination["total_pages"] = page  # This is the last page
+
+            result_data = {
+                "status": "success",
+                "query": query,
+                "pagination": pagination,
+                "results": summarized_results,
+                "note": "Results are summarized. Use the provided api_url or web_url to fetch full details, or use get_comments, get_card, etc. with the provided IDs."
+            }
+
+            # Add warning if results were limited
+            if warning:
+                result_data["warning"] = warning
+
+            # Add hint for next page if there are more results
+            if has_more_results:
+                result_data["note"] += f" To see more results, search again with page={page + 1}."
+
+            return result_data
+
+        except Exception as e:
+            logger.error(f"Error in native search: {str(e)}")
+            return {
+                "status": "error",
+                "query": query,
+                "error": str(e),
+                "results": []
+            }
+
     def global_search(self, query=None):
-        """Search projects, todos, campfire lines, and uploads at once."""
+        """
+        Search projects, todos, campfire lines, and uploads at once.
+
+        DEPRECATED: Use native_search() instead for better performance
+        and more comprehensive search results including campfire messages.
+        """
         return {
             "projects": self.search_projects(query),
             "todos": self.search_todos(query),

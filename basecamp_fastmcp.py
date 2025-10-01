@@ -151,44 +151,52 @@ async def get_project(project_id: str) -> Dict[str, Any]:
         }
 
 @mcp.tool()
-async def search_basecamp(query: str, project_id: Optional[str] = None) -> Dict[str, Any]:
-    """Search across Basecamp projects, todos, and messages.
-    
+async def search_basecamp(query: str, page: Optional[int] = 1, max_results: Optional[int] = 16) -> Dict[str, Any]:
+    """Search across all Basecamp content using native search API.
+
+    Searches across:
+    - Comments
+    - Messages
+    - Todos
+    - Cards
+    - Documents
+    - Uploads
+    - Campfire/chat messages
+    - And more...
+
+    Returns summarized results with id, type, title, preview (truncated), and URLs.
+    Use get_comments, get_card, get_document, etc. with the returned IDs to fetch full details.
+
+    Results are paginated with a hard limit of 16 results per page.
+
     Args:
-        query: Search query
-        project_id: Optional project ID to limit search scope
+        query: Search query string
+        page: Page number to fetch (default: 1, 1-based)
+        max_results: Maximum number of results to return (default: 16, hard limit: 16)
     """
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
         search = BasecampSearch(client=client)
-        results = {}
+        # Use native search API which is much faster and more comprehensive
+        result = await _run_sync(
+            lambda: search.native_search(query, page=page, max_results=max_results)
+        )
 
-        if project_id:
-            # Search within specific project
-            results["todolists"] = await _run_sync(search.search_todolists, query, project_id)
-            results["todos"] = await _run_sync(search.search_todos, query, project_id)
-        else:
-            # Search across all projects
-            results["projects"] = await _run_sync(search.search_projects, query)
-            results["todos"] = await _run_sync(search.search_todos, query)
-            results["messages"] = await _run_sync(search.search_messages, query)
-
-        return {
-            "status": "success",
-            "query": query,
-            "results": results
-        }
+        # Return the full result which includes status, query, pagination, results, note, and optional warning
+        return result
     except Exception as e:
         logger.error(f"Error searching Basecamp: {e}")
         if "401" in str(e) and "expired" in str(e).lower():
             return {
+                "status": "error",
                 "error": "OAuth token expired",
                 "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
             }
         return {
+            "status": "error",
             "error": "Execution error",
             "message": str(e)
         }
@@ -465,32 +473,46 @@ async def uncomplete_todo(project_id: str, todo_id: str) -> Dict[str, Any]:
         }
 
 @mcp.tool()
-async def global_search(query: str) -> Dict[str, Any]:
-    """Search projects, todos and campfire messages across all projects.
-    
+async def global_search(query: str, page: Optional[int] = 1, max_results: Optional[int] = 16) -> Dict[str, Any]:
+    """Search across all Basecamp content using native search API.
+
+    This is an alias for search_basecamp() for backward compatibility.
+    Searches across all content types including comments, messages, todos,
+    cards, documents, uploads, and campfire/chat messages.
+
+    Returns summarized results with id, type, title, preview (truncated), and URLs.
+    Use get_comments, get_card, get_document, etc. with the returned IDs to fetch full details.
+
+    Results are paginated with a hard limit of 16 results per page.
+
     Args:
-        query: Search query
+        query: Search query string
+        page: Page number to fetch (default: 1, 1-based)
+        max_results: Maximum number of results to return (default: 16, hard limit: 16)
     """
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
         search = BasecampSearch(client=client)
-        results = await _run_sync(search.global_search, query)
-        return {
-            "status": "success",
-            "query": query,
-            "results": results
-        }
+        # Use native search API which is much faster and more comprehensive
+        result = await _run_sync(
+            lambda: search.native_search(query, page=page, max_results=max_results)
+        )
+
+        # Return the full result which includes status, query, pagination, results, note, and optional warning
+        return result
     except Exception as e:
         logger.error(f"Error in global search: {e}")
         if "401" in str(e) and "expired" in str(e).lower():
             return {
+                "status": "error",
                 "error": "OAuth token expired",
                 "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
             }
         return {
+            "status": "error",
             "error": "Execution error",
             "message": str(e)
         }

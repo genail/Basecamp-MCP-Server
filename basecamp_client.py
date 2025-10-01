@@ -897,3 +897,45 @@ class BasecampClient:
             return response.json()
         else:
             raise Exception(f"Failed to get upload: {response.status_code} - {response.text}")
+
+    # Search methods
+    def search(self, query, page=1):
+        """
+        Search across all Basecamp content using the native search API.
+
+        Args:
+            query (str): Search query string
+            page (int, optional): Page number for pagination (default: 1)
+
+        Returns:
+            dict: Search results with 'results' list and optional 'next_page' indicator
+
+        Note:
+            The search API returns various content types including:
+            - Comments
+            - Messages
+            - Todos
+            - Cards
+            - Documents
+            - Uploads
+            And more...
+        """
+        endpoint = f"search.json"
+        params = {"query": query, "page": page}
+        response = self.get(endpoint, params=params)
+
+        if response.status_code == 200:
+            results = response.json()
+
+            # Check for pagination in Link header
+            result_dict = {"results": results}
+            link_header = response.headers.get('Link', '')
+            if 'rel="next"' in link_header:
+                result_dict['has_next_page'] = True
+                result_dict['next_page'] = page + 1
+            else:
+                result_dict['has_next_page'] = False
+
+            return result_dict
+        else:
+            raise Exception(f"Failed to search: {response.status_code} - {response.text}")
