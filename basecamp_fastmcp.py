@@ -834,9 +834,81 @@ async def get_campfire_lines(
         }
 
 @mcp.tool()
+async def get_messages(
+    project_id: str,
+    page: Optional[int] = 1,
+    max_results: Optional[int] = 16,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
+    """Get messages from a project's message board.
+
+    Results are paginated and summarized by default for optimal token usage.
+
+    Args:
+        project_id: The project ID
+        page: Page number (default: 1, 1-based)
+        max_results: Maximum results per page (default: 16, hard limit: 16)
+        raw_response: If True, return complete API response without summarization (default: False)
+    """
+    from response_helpers import HARD_LIMITS, create_pagination_info, summarize_message
+
+    client = _get_basecamp_client()
+    if not client:
+        return _get_auth_error_response()
+
+    try:
+        HARD_LIMIT = HARD_LIMITS["default"]
+        warning = None
+
+        if max_results > HARD_LIMIT:
+            warning = f"Requested {max_results} results, but limited to maximum of {HARD_LIMIT} per page to prevent excessive token usage."
+            max_results = HARD_LIMIT
+            logger.warning(warning)
+
+        all_messages = await _run_sync(client.get_messages, project_id)
+
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_messages = all_messages[start_idx:end_idx]
+        has_more = end_idx < len(all_messages)
+
+        if not raw_response:
+            page_messages = [summarize_message(msg) for msg in page_messages]
+
+        pagination = create_pagination_info(page, len(page_messages), HARD_LIMIT, has_more)
+
+        result = {
+            "status": "success",
+            "pagination": pagination,
+            "messages": page_messages,
+            "note": "Results are summarized. Use raw_response=True to get complete details."
+        }
+
+        if warning:
+            result["warning"] = warning
+        if has_more:
+            result["note"] += f" To see more results, request page={page + 1}."
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting messages: {e}")
+        if "401" in str(e) and "expired" in str(e).lower():
+            return {
+                "status": "error",
+                "error": "OAuth token expired",
+                "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
+            }
+        return {
+            "status": "error",
+            "error": "Execution error",
+            "message": str(e)
+        }
+
+@mcp.tool()
 async def get_card_tables(project_id: str) -> Dict[str, Any]:
     """Get all card tables for a project.
-    
+
     Args:
         project_id: The project ID
     """

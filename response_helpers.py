@@ -440,3 +440,34 @@ def summarize_todolist(todolist: Dict[str, Any]) -> Dict[str, Any]:
         summary["web_url"] = todolist["app_url"]
 
     return summary
+
+
+def summarize_message(message: Dict[str, Any]) -> Dict[str, Any]:
+    """Summarize a message."""
+    summary = {
+        "id": message.get("id"),
+        "subject": truncate_text_by_words(message.get("subject", ""), 100),
+        "status": message.get("status"),
+    }
+
+    # Content preview (truncated)
+    if message.get("content"):
+        summary["content_preview"] = truncate_text_by_words(message.get("content"), 200)
+
+    # Creator - just name
+    if message.get("creator"):
+        summary["creator"] = message["creator"].get("name")
+
+    # Timestamps
+    if message.get("created_at"):
+        summary["created_at"] = message["created_at"]
+    if message.get("updated_at"):
+        summary["updated_at"] = message["updated_at"]
+
+    # URLs
+    if message.get("url"):
+        summary["api_url"] = message["url"]
+    if message.get("app_url"):
+        summary["web_url"] = message["app_url"]
+
+    return summary

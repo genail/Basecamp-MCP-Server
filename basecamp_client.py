@@ -353,7 +353,21 @@ class BasecampClient:
     # Message board methods
     def get_message_board(self, project_id):
         """Get the message board for a project."""
-        response = self.get(f'projects/{project_id}/message_board.json')
+        # Get project to find message board ID in dock
+        project = self.get_project(project_id)
+        message_board_tool = None
+
+        for tool in project.get('dock', []):
+            if tool.get('name') == 'message_board':
+                message_board_tool = tool
+                break
+
+        if not message_board_tool:
+            raise Exception(f"Message board not enabled for project {project_id}")
+
+        message_board_id = message_board_tool.get('id')
+        response = self.get(f'buckets/{project_id}/message_boards/{message_board_id}.json')
+
         if response.status_code == 200:
             return response.json()
         else:
@@ -361,12 +375,12 @@ class BasecampClient:
 
     def get_messages(self, project_id):
         """Get all messages for a project."""
-        # First get the message board ID
+        # First get the message board
         message_board = self.get_message_board(project_id)
         message_board_id = message_board['id']
 
-        # Then get all messages
-        response = self.get('messages.json', {'message_board_id': message_board_id})
+        # Get messages from the message board
+        response = self.get(f'buckets/{project_id}/message_boards/{message_board_id}/messages.json')
         if response.status_code == 200:
             return response.json()
         else:
