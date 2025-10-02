@@ -96,27 +96,71 @@ async def _run_sync(func, *args, **kwargs):
 # Core MCP Tools - Starting with essential ones from original server
 
 @mcp.tool()
-async def get_projects() -> Dict[str, Any]:
-    """Get all Basecamp projects."""
+async def get_projects(
+    page: Optional[int] = 1,
+    max_results: Optional[int] = 16,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
+    """Get all Basecamp projects.
+
+    Results are paginated and summarized by default for optimal token usage.
+
+    Args:
+        page: Page number (default: 1, 1-based)
+        max_results: Maximum results per page (default: 16, hard limit: 16)
+        raw_response: If True, return complete API response without summarization (default: False)
+    """
+    from response_helpers import HARD_LIMITS, create_pagination_info, summarize_project
+
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
-        projects = await _run_sync(client.get_projects)
-        return {
+        HARD_LIMIT = HARD_LIMITS["default"]
+        warning = None
+
+        if max_results > HARD_LIMIT:
+            warning = f"Requested {max_results} results, but limited to maximum of {HARD_LIMIT} per page to prevent excessive token usage."
+            max_results = HARD_LIMIT
+            logger.warning(warning)
+
+        all_projects = await _run_sync(client.get_projects)
+
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_projects = all_projects[start_idx:end_idx]
+        has_more = end_idx < len(all_projects)
+
+        if not raw_response:
+            page_projects = [summarize_project(p) for p in page_projects]
+
+        pagination = create_pagination_info(page, len(page_projects), HARD_LIMIT, has_more)
+
+        result = {
             "status": "success",
-            "projects": projects,
-            "count": len(projects)
+            "pagination": pagination,
+            "projects": page_projects,
+            "note": "Results are summarized. Use raw_response=True to get complete details."
         }
+
+        if warning:
+            result["warning"] = warning
+        if has_more:
+            result["note"] += f" To see more results, request page={page + 1}."
+
+        return result
+
     except Exception as e:
         logger.error(f"Error getting projects: {e}")
         if "401" in str(e) and "expired" in str(e).lower():
             return {
+                "status": "error",
                 "error": "OAuth token expired",
                 "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
             }
         return {
+            "status": "error",
             "error": "Execution error",
             "message": str(e)
         }
@@ -202,62 +246,154 @@ async def search_basecamp(query: str, page: Optional[int] = 1, max_results: Opti
         }
 
 @mcp.tool()
-async def get_todolists(project_id: str) -> Dict[str, Any]:
+async def get_todolists(
+    project_id: str,
+    page: Optional[int] = 1,
+    max_results: Optional[int] = 64,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
     """Get todo lists for a project.
-    
+
+    Results are paginated and summarized by default for optimal token usage.
+
     Args:
         project_id: The project ID
+        page: Page number (default: 1, 1-based)
+        max_results: Maximum results per page (default: 64, hard limit: 64)
+        raw_response: If True, return complete API response without summarization (default: False)
     """
+    from response_helpers import HARD_LIMITS, create_pagination_info, summarize_todolist
+
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
-        todolists = await _run_sync(client.get_todolists, project_id)
-        return {
+        HARD_LIMIT = HARD_LIMITS["todos"]
+        warning = None
+
+        if max_results > HARD_LIMIT:
+            warning = f"Requested {max_results} results, but limited to maximum of {HARD_LIMIT} per page to prevent excessive token usage."
+            max_results = HARD_LIMIT
+            logger.warning(warning)
+
+        all_todolists = await _run_sync(client.get_todolists, project_id)
+
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_todolists = all_todolists[start_idx:end_idx]
+        has_more = end_idx < len(all_todolists)
+
+        if not raw_response:
+            page_todolists = [summarize_todolist(tl) for tl in page_todolists]
+
+        pagination = create_pagination_info(page, len(page_todolists), HARD_LIMIT, has_more)
+
+        result = {
             "status": "success",
-            "todolists": todolists,
-            "count": len(todolists)
+            "pagination": pagination,
+            "todolists": page_todolists,
+            "note": "Results are summarized. Use raw_response=True to get complete details."
         }
+
+        if warning:
+            result["warning"] = warning
+        if has_more:
+            result["note"] += f" To see more results, request page={page + 1}."
+
+        return result
+
     except Exception as e:
         logger.error(f"Error getting todolists: {e}")
         if "401" in str(e) and "expired" in str(e).lower():
             return {
+                "status": "error",
                 "error": "OAuth token expired",
                 "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
             }
         return {
+            "status": "error",
             "error": "Execution error",
             "message": str(e)
         }
 
 @mcp.tool()
-async def get_todos(project_id: str, todolist_id: str) -> Dict[str, Any]:
+async def get_todos(
+    project_id: str,
+    todolist_id: str,
+    page: Optional[int] = 1,
+    max_results: Optional[int] = 64,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
     """Get todos from a todo list.
-    
+
+    Results are paginated and summarized by default for optimal token usage.
+
     Args:
         project_id: Project ID
         todolist_id: The todo list ID
+        page: Page number (default: 1, 1-based)
+        max_results: Maximum results per page (default: 64, hard limit: 64)
+        raw_response: If True, return complete API response without summarization (default: False)
+                     WARNING: Only use when you need complete object details
     """
+    from response_helpers import HARD_LIMITS, create_pagination_info, summarize_todo
+
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
-        todos = await _run_sync(client.get_todos, project_id, todolist_id)
-        return {
+        # Hard limit enforcement
+        HARD_LIMIT = HARD_LIMITS["todos"]
+        warning = None
+
+        if max_results > HARD_LIMIT:
+            warning = f"Requested {max_results} results, but limited to maximum of {HARD_LIMIT} per page to prevent excessive token usage."
+            max_results = HARD_LIMIT
+            logger.warning(warning)
+
+        # Get all todos (client handles pagination internally)
+        all_todos = await _run_sync(client.get_todos, project_id, todolist_id)
+
+        # Calculate pagination
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_todos = all_todos[start_idx:end_idx]
+        has_more = end_idx < len(all_todos)
+
+        # Summarize if not raw response
+        if not raw_response:
+            page_todos = [summarize_todo(todo) for todo in page_todos]
+
+        # Create response
+        pagination = create_pagination_info(page, len(page_todos), HARD_LIMIT, has_more)
+
+        result = {
             "status": "success",
-            "todos": todos,
-            "count": len(todos)
+            "pagination": pagination,
+            "todos": page_todos,
+            "note": "Results are summarized. Use raw_response=True to get complete details."
         }
+
+        if warning:
+            result["warning"] = warning
+
+        if has_more:
+            result["note"] += f" To see more results, request page={page + 1}."
+
+        return result
+
     except Exception as e:
         logger.error(f"Error getting todos: {e}")
         if "401" in str(e) and "expired" in str(e).lower():
             return {
+                "status": "error",
                 "error": "OAuth token expired",
                 "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
             }
         return {
+            "status": "error",
             "error": "Execution error",
             "message": str(e)
         }
@@ -518,32 +654,75 @@ async def global_search(query: str, page: Optional[int] = 1, max_results: Option
         }
 
 @mcp.tool()
-async def get_comments(recording_id: str, project_id: str) -> Dict[str, Any]:
+async def get_comments(
+    recording_id: str,
+    project_id: str,
+    page: Optional[int] = 1,
+    max_results: Optional[int] = 16,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
     """Get comments for a Basecamp item.
-    
+
+    Results are paginated and summarized by default for optimal token usage.
+
     Args:
         recording_id: The item ID
         project_id: The project ID
+        page: Page number (default: 1, 1-based)
+        max_results: Maximum results per page (default: 16, hard limit: 16)
+        raw_response: If True, return complete API response without summarization (default: False)
     """
+    from response_helpers import HARD_LIMITS, create_pagination_info, summarize_comment
+
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
-        comments = await _run_sync(client.get_comments, project_id, recording_id)
-        return {
+        HARD_LIMIT = HARD_LIMITS["default"]
+        warning = None
+
+        if max_results > HARD_LIMIT:
+            warning = f"Requested {max_results} results, but limited to maximum of {HARD_LIMIT} per page to prevent excessive token usage."
+            max_results = HARD_LIMIT
+            logger.warning(warning)
+
+        all_comments = await _run_sync(client.get_comments, project_id, recording_id)
+
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_comments = all_comments[start_idx:end_idx]
+        has_more = end_idx < len(all_comments)
+
+        if not raw_response:
+            page_comments = [summarize_comment(c) for c in page_comments]
+
+        pagination = create_pagination_info(page, len(page_comments), HARD_LIMIT, has_more)
+
+        result = {
             "status": "success",
-            "comments": comments,
-            "count": len(comments)
+            "pagination": pagination,
+            "comments": page_comments,
+            "note": "Results are summarized. Use raw_response=True to get complete details."
         }
+
+        if warning:
+            result["warning"] = warning
+        if has_more:
+            result["note"] += f" To see more results, request page={page + 1}."
+
+        return result
+
     except Exception as e:
         logger.error(f"Error getting comments: {e}")
         if "401" in str(e) and "expired" in str(e).lower():
             return {
+                "status": "error",
                 "error": "OAuth token expired",
                 "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
             }
         return {
+            "status": "error",
             "error": "Execution error",
             "message": str(e)
         }
@@ -581,32 +760,75 @@ async def create_comment(recording_id: str, project_id: str, content: str) -> Di
         }
 
 @mcp.tool()
-async def get_campfire_lines(project_id: str, campfire_id: str) -> Dict[str, Any]:
+async def get_campfire_lines(
+    project_id: str,
+    campfire_id: str,
+    page: Optional[int] = 1,
+    max_results: Optional[int] = 16,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
     """Get recent messages from a Basecamp campfire (chat room).
-    
+
+    Results are paginated and summarized by default for optimal token usage.
+
     Args:
         project_id: The project ID
         campfire_id: The campfire/chat room ID
+        page: Page number (default: 1, 1-based)
+        max_results: Maximum results per page (default: 16, hard limit: 16)
+        raw_response: If True, return complete API response without summarization (default: False)
     """
+    from response_helpers import HARD_LIMITS, create_pagination_info, summarize_campfire_line
+
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
-        lines = await _run_sync(client.get_campfire_lines, project_id, campfire_id)
-        return {
+        HARD_LIMIT = HARD_LIMITS["default"]
+        warning = None
+
+        if max_results > HARD_LIMIT:
+            warning = f"Requested {max_results} results, but limited to maximum of {HARD_LIMIT} per page to prevent excessive token usage."
+            max_results = HARD_LIMIT
+            logger.warning(warning)
+
+        all_lines = await _run_sync(client.get_campfire_lines, project_id, campfire_id)
+
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_lines = all_lines[start_idx:end_idx]
+        has_more = end_idx < len(all_lines)
+
+        if not raw_response:
+            page_lines = [summarize_campfire_line(line) for line in page_lines]
+
+        pagination = create_pagination_info(page, len(page_lines), HARD_LIMIT, has_more)
+
+        result = {
             "status": "success",
-            "campfire_lines": lines,
-            "count": len(lines)
+            "pagination": pagination,
+            "campfire_lines": page_lines,
+            "note": "Results are summarized. Use raw_response=True to get complete details."
         }
+
+        if warning:
+            result["warning"] = warning
+        if has_more:
+            result["note"] += f" To see more results, request page={page + 1}."
+
+        return result
+
     except Exception as e:
         logger.error(f"Error getting campfire lines: {e}")
         if "401" in str(e) and "expired" in str(e).lower():
             return {
+                "status": "error",
                 "error": "OAuth token expired",
                 "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
             }
         return {
+            "status": "error",
             "error": "Execution error",
             "message": str(e)
         }
@@ -705,35 +927,73 @@ async def get_columns(project_id: str, card_table_id: str) -> Dict[str, Any]:
         }
 
 @mcp.tool()
-async def get_cards(project_id: str, column_id: str) -> Dict[str, Any]:
+async def get_cards(
+    project_id: str,
+    column_id: str,
+    page: Optional[int] = 1,
+    max_results: Optional[int] = 16,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
     """Get all cards in a column.
-    
+
+    Results are paginated and summarized by default for optimal token usage.
+
     Args:
         project_id: The project ID
         column_id: The column ID
+        page: Page number (default: 1, 1-based)
+        max_results: Maximum results per page (default: 16, hard limit: 16)
+        raw_response: If True, return complete API response without summarization (default: False)
     """
+    from response_helpers import HARD_LIMITS, create_pagination_info, summarize_card
+
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
-        cards = await _run_sync(client.get_cards, project_id, column_id)
-        return {
+        HARD_LIMIT = HARD_LIMITS["default"]
+        warning = None
+
+        if max_results > HARD_LIMIT:
+            warning = f"Requested {max_results} results, but limited to maximum of {HARD_LIMIT} per page."
+            max_results = HARD_LIMIT
+
+        all_cards = await _run_sync(client.get_cards, project_id, column_id)
+
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_cards = all_cards[start_idx:end_idx]
+        has_more = end_idx < len(all_cards)
+
+        if not raw_response:
+            page_cards = [summarize_card(c) for c in page_cards]
+
+        pagination = create_pagination_info(page, len(page_cards), HARD_LIMIT, has_more)
+
+        result = {
             "status": "success",
-            "cards": cards,
-            "count": len(cards)
+            "pagination": pagination,
+            "cards": page_cards,
+            "note": "Results are summarized. Use raw_response=True for complete details."
         }
+
+        if warning:
+            result["warning"] = warning
+        if has_more:
+            result["note"] += f" More on page={page + 1}."
+
+        return result
+
     except Exception as e:
         logger.error(f"Error getting cards: {e}")
         if "401" in str(e) and "expired" in str(e).lower():
             return {
+                "status": "error",
                 "error": "OAuth token expired",
-                "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
+                "message": "Your Basecamp OAuth token expired during the API call."
             }
-        return {
-            "error": "Execution error",
-            "message": str(e)
-        }
+        return {"status": "error", "error": str(e)}
 
 @mcp.tool()
 async def create_card(project_id: str, column_id: str, title: str, content: Optional[str] = None, due_on: Optional[str] = None, notify: bool = False) -> Dict[str, Any]:
@@ -894,34 +1154,72 @@ async def complete_card(project_id: str, card_id: str) -> Dict[str, Any]:
         }
 
 @mcp.tool()
-async def get_card(project_id: str, card_id: str) -> Dict[str, Any]:
-    """Get details for a specific card.
-    
+async def get_card(
+    project_id: str,
+    card_id: str,
+    content_offset: Optional[int] = 0,
+    content_length: Optional[int] = 2000,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
+    """Get details for a specific card with optional content chunking.
+
+    For cards with large content, use content_offset and content_length to retrieve content in chunks.
+
     Args:
         project_id: The project ID
         card_id: The card ID
+        content_offset: Character offset to start from (default: 0)
+        content_length: Maximum length of content chunk in characters (default: 2000)
+        raw_response: If True, return complete API response (default: False)
     """
+    from response_helpers import chunk_content_by_words, extract_names_from_people_list
+
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
         card = await _run_sync(client.get_card, project_id, card_id)
-        return {
+
+        # If raw response requested, return as-is
+        if raw_response:
+            return {
+                "status": "success",
+                "card": card
+            }
+
+        # Extract and chunk content
+        content = card.get("content", "")
+        content_info = chunk_content_by_words(content, content_offset, content_length)
+
+        # Build summarized response with chunked content
+        result = {
             "status": "success",
-            "card": card
+            "card": {
+                "id": card.get("id"),
+                "title": card.get("title"),
+                "status": card.get("status"),
+                "content_info": content_info,
+                "due_on": card.get("due_on"),
+                "assignees": extract_names_from_people_list(card.get("assignees", [])),
+                "creator": card.get("creator", {}).get("name") if card.get("creator") else None,
+                "created_at": card.get("created_at"),
+                "updated_at": card.get("updated_at"),
+                "url": card.get("url"),
+                "app_url": card.get("app_url")
+            },
+            "note": "Content is chunked. Use content_offset and content_length to navigate. Use raw_response=True for complete card."
         }
+
+        if content_info.get("has_more"):
+            next_offset = content_info.get("next_offset")
+            result["note"] += f" More content available at offset={next_offset}."
+
+        return result
+
     except Exception as e:
         logger.error(f"Error getting card: {e}")
-        if "401" in str(e) and "expired" in str(e).lower():
-            return {
-                "error": "OAuth token expired", 
-                "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
-            }
-        return {
-            "error": "Execution error",
-            "message": str(e)
-        }
+        return {"status": "error", "error": str(e)}
 
 @mcp.tool()
 async def update_card(project_id: str, card_id: str, title: Optional[str] = None, content: Optional[str] = None, due_on: Optional[str] = None, assignee_ids: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -1649,65 +1947,133 @@ async def delete_webhook(project_id: str, webhook_id: str) -> Dict[str, Any]:
 
 # Document Management
 @mcp.tool()
-async def get_documents(project_id: str, vault_id: str) -> Dict[str, Any]:
+async def get_documents(
+    project_id: str,
+    vault_id: str,
+    page: Optional[int] = 1,
+    max_results: Optional[int] = 16,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
     """List documents in a vault.
-    
+
+    Results are paginated and summarized by default for optimal token usage.
+
     Args:
         project_id: Project ID
         vault_id: Vault ID
+        page: Page number (default: 1)
+        max_results: Maximum results per page (default: 16, hard limit: 16)
+        raw_response: If True, return complete API response (default: False)
     """
+    from response_helpers import HARD_LIMITS, create_pagination_info, summarize_document
+
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
-        docs = await _run_sync(client.get_documents, project_id, vault_id)
-        return {
+        HARD_LIMIT = HARD_LIMITS["default"]
+        warning = None
+
+        if max_results > HARD_LIMIT:
+            warning = f"Requested {max_results} results, limited to {HARD_LIMIT}."
+            max_results = HARD_LIMIT
+
+        all_docs = await _run_sync(client.get_documents, project_id, vault_id)
+
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_docs = all_docs[start_idx:end_idx]
+        has_more = end_idx < len(all_docs)
+
+        if not raw_response:
+            page_docs = [summarize_document(d) for d in page_docs]
+
+        pagination = create_pagination_info(page, len(page_docs), HARD_LIMIT, has_more)
+
+        result = {
             "status": "success",
-            "documents": docs,
-            "count": len(docs)
-        }
-    except Exception as e:
-        logger.error(f"Error getting documents: {e}")
-        if "401" in str(e) and "expired" in str(e).lower():
-            return {
-                "error": "OAuth token expired",
-                "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
-            }
-        return {
-            "error": "Execution error",
-            "message": str(e)
+            "pagination": pagination,
+            "documents": page_docs,
+            "note": "Summarized. Use raw_response=True for full details."
         }
 
+        if warning:
+            result["warning"] = warning
+        if has_more:
+            result["note"] += f" More on page={page + 1}."
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting documents: {e}")
+        return {"status": "error", "error": str(e)}
+
 @mcp.tool()
-async def get_document(project_id: str, document_id: str) -> Dict[str, Any]:
-    """Get a single document.
-    
+async def get_document(
+    project_id: str,
+    document_id: str,
+    content_offset: Optional[int] = 0,
+    content_length: Optional[int] = 2000,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
+    """Get a single document with optional content chunking.
+
+    For large documents, use content_offset and content_length to retrieve content in chunks.
+
     Args:
         project_id: Project ID
         document_id: Document ID
+        content_offset: Character offset to start from (default: 0)
+        content_length: Maximum length of content chunk in characters (default: 2000)
+        raw_response: If True, return complete API response (default: False)
     """
+    from response_helpers import chunk_content_by_words
+
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
         doc = await _run_sync(client.get_document, project_id, document_id)
-        return {
+
+        # If raw response requested, return as-is
+        if raw_response:
+            return {
+                "status": "success",
+                "document": doc
+            }
+
+        # Extract and chunk content
+        content = doc.get("content", "")
+        content_info = chunk_content_by_words(content, content_offset, content_length)
+
+        # Build summarized response with chunked content
+        result = {
             "status": "success",
-            "document": doc
+            "document": {
+                "id": doc.get("id"),
+                "title": doc.get("title"),
+                "status": doc.get("status"),
+                "content_info": content_info,
+                "creator": doc.get("creator", {}).get("name") if doc.get("creator") else None,
+                "created_at": doc.get("created_at"),
+                "updated_at": doc.get("updated_at"),
+                "url": doc.get("url"),
+                "app_url": doc.get("app_url")
+            },
+            "note": "Content is chunked. Use content_offset and content_length to navigate. Use raw_response=True for complete document."
         }
+
+        if content_info.get("has_more"):
+            next_offset = content_info.get("next_offset")
+            result["note"] += f" More content available at offset={next_offset}."
+
+        return result
+
     except Exception as e:
         logger.error(f"Error getting document: {e}")
-        if "401" in str(e) and "expired" in str(e).lower():
-            return {
-                "error": "OAuth token expired",
-                "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
-            }
-        return {
-            "error": "Execution error",
-            "message": str(e)
-        }
+        return {"status": "error", "error": str(e)}
 
 @mcp.tool()
 async def create_document(project_id: str, vault_id: str, title: str, content: str) -> Dict[str, Any]:
@@ -1805,35 +2171,67 @@ async def trash_document(project_id: str, document_id: str) -> Dict[str, Any]:
 
 # Upload Management
 @mcp.tool()
-async def get_uploads(project_id: str, vault_id: Optional[str] = None) -> Dict[str, Any]:
+async def get_uploads(
+    project_id: str,
+    vault_id: Optional[str] = None,
+    page: Optional[int] = 1,
+    max_results: Optional[int] = 16,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
     """List uploads in a project or vault.
-    
+
+    Results are paginated and summarized by default for optimal token usage.
+
     Args:
         project_id: Project ID
         vault_id: Optional vault ID to limit to specific vault
+        page: Page number (default: 1)
+        max_results: Maximum results per page (default: 16, hard limit: 16)
+        raw_response: If True, return complete API response (default: False)
     """
+    from response_helpers import HARD_LIMITS, create_pagination_info, summarize_upload
+
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
-    
+
     try:
-        uploads = await _run_sync(client.get_uploads, project_id, vault_id)
-        return {
+        HARD_LIMIT = HARD_LIMITS["default"]
+        warning = None
+
+        if max_results > HARD_LIMIT:
+            warning = f"Requested {max_results} results, limited to {HARD_LIMIT}."
+            max_results = HARD_LIMIT
+
+        all_uploads = await _run_sync(client.get_uploads, project_id, vault_id)
+
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_uploads = all_uploads[start_idx:end_idx]
+        has_more = end_idx < len(all_uploads)
+
+        if not raw_response:
+            page_uploads = [summarize_upload(u) for u in page_uploads]
+
+        pagination = create_pagination_info(page, len(page_uploads), HARD_LIMIT, has_more)
+
+        result = {
             "status": "success",
-            "uploads": uploads,
-            "count": len(uploads)
+            "pagination": pagination,
+            "uploads": page_uploads,
+            "note": "Summarized. Use raw_response=True for full details."
         }
+
+        if warning:
+            result["warning"] = warning
+        if has_more:
+            result["note"] += f" More on page={page + 1}."
+
+        return result
+
     except Exception as e:
         logger.error(f"Error getting uploads: {e}")
-        if "401" in str(e) and "expired" in str(e).lower():
-            return {
-                "error": "OAuth token expired",
-                "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
-            }
-        return {
-            "error": "Execution error",
-            "message": str(e)
-        }
+        return {"status": "error", "error": str(e)}
 
 @mcp.tool()
 async def get_upload(project_id: str, upload_id: str) -> Dict[str, Any]:
