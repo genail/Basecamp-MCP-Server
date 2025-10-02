@@ -386,6 +386,14 @@ class BasecampClient:
         else:
             raise Exception(f"Failed to get messages: {response.status_code} - {response.text}")
 
+    def get_message(self, project_id, message_id):
+        """Get a single message by ID."""
+        response = self.get(f'buckets/{project_id}/messages/{message_id}.json')
+        if response.status_code == 200:
+            return response.json()
+        else:
+            raise Exception(f"Failed to get message: {response.status_code} - {response.text}")
+
     # Schedule methods
     def get_schedule(self, project_id):
         """Get the schedule for a project."""

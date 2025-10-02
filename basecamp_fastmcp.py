@@ -906,6 +906,82 @@ async def get_messages(
         }
 
 @mcp.tool()
+async def get_message(
+    project_id: str,
+    message_id: str,
+    content_offset: Optional[int] = 0,
+    content_length: Optional[int] = 2000,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
+    """Get a single message with optional content chunking.
+
+    For large messages, use content_offset and content_length to retrieve content in chunks.
+
+    Args:
+        project_id: Project ID
+        message_id: Message ID
+        content_offset: Character offset to start from (default: 0)
+        content_length: Maximum length of content chunk in characters (default: 2000)
+        raw_response: If True, return complete API response (default: False)
+    """
+    from response_helpers import chunk_content_by_words
+
+    client = _get_basecamp_client()
+    if not client:
+        return _get_auth_error_response()
+
+    try:
+        message = await _run_sync(client.get_message, project_id, message_id)
+
+        # If raw response requested, return as-is
+        if raw_response:
+            return {
+                "status": "success",
+                "message": message
+            }
+
+        # Extract and chunk content
+        content = message.get("content", "")
+        content_info = chunk_content_by_words(content, content_offset, content_length)
+
+        # Build summarized response with chunked content
+        result = {
+            "status": "success",
+            "message": {
+                "id": message.get("id"),
+                "subject": message.get("subject"),
+                "status": message.get("status"),
+                "content_info": content_info,
+                "creator": message.get("creator", {}).get("name") if message.get("creator") else None,
+                "created_at": message.get("created_at"),
+                "updated_at": message.get("updated_at"),
+                "url": message.get("url"),
+                "app_url": message.get("app_url")
+            },
+            "note": "Content is chunked. Use content_offset and content_length to navigate. Use raw_response=True for complete message."
+        }
+
+        if content_info.get("has_more"):
+            next_offset = content_info.get("next_offset")
+            result["note"] += f" More content available at offset={next_offset}."
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting message: {e}")
+        if "401" in str(e) and "expired" in str(e).lower():
+            return {
+                "status": "error",
+                "error": "OAuth token expired",
+                "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
+            }
+        return {
+            "status": "error",
+            "error": "Execution error",
+            "message": str(e)
+        }
+
+@mcp.tool()
 async def get_card_tables(project_id: str) -> Dict[str, Any]:
     """Get all card tables for a project.
 
