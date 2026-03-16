@@ -135,56 +135,14 @@ def get_oauth_client():
 
 def ensure_valid_token():
     """
-    Ensure we have a valid, non-expired token. 
+    Ensure we have a valid, non-expired token.
     Attempts to refresh if expired.
-    
+
     Returns:
         dict: Valid token data or None if authentication is needed
     """
-    token_data = token_storage.get_token()
-    
-    if not token_data or not token_data.get('access_token'):
-        logger.info("No token found")
-        return None
-    
-    # Check if token is expired
-    if token_storage.is_token_expired():
-        logger.info("Token is expired, attempting to refresh")
-        
-        refresh_token = token_data.get('refresh_token')
-        if not refresh_token:
-            logger.warning("No refresh token available, user needs to re-authenticate")
-            return None
-        
-        try:
-            oauth_client = get_oauth_client()
-            new_token_data = oauth_client.refresh_token(refresh_token)
-            
-            # Store the new token
-            access_token = new_token_data.get('access_token')
-            new_refresh_token = new_token_data.get('refresh_token', refresh_token)  # Use old refresh token if new one not provided
-            expires_in = new_token_data.get('expires_in')
-            account_id = token_data.get('account_id')  # Keep the existing account_id
-            
-            if access_token:
-                token_storage.store_token(
-                    access_token=access_token,
-                    refresh_token=new_refresh_token,
-                    expires_in=expires_in,
-                    account_id=account_id
-                )
-                logger.info("Token refreshed successfully")
-                return token_storage.get_token()
-            else:
-                logger.error("No access token in refresh response")
-                return None
-                
-        except Exception as e:
-            logger.error("Failed to refresh token: %s", str(e))
-            return None
-    
-    logger.info("Token is valid")
-    return token_data
+    # Delegate to shared implementation in token_storage
+    return token_storage.ensure_valid_token()
 
 @app.route('/')
 def home():

@@ -42,18 +42,17 @@ mcp = FastMCP("basecamp")
 
 # Auth helper functions (reused from original server)
 def _get_basecamp_client() -> Optional[BasecampClient]:
-    """Get authenticated Basecamp client (sync version from original server)."""
+    """Get authenticated Basecamp client (sync version from original server).
+
+    Automatically refreshes expired tokens if a refresh token is available.
+    """
     try:
-        token_data = token_storage.get_token()
+        # Use ensure_valid_token which auto-refreshes if needed
+        token_data = token_storage.ensure_valid_token()
         logger.debug(f"Token data retrieved: {token_data}")
 
         if not token_data or not token_data.get('access_token'):
-            logger.error("No OAuth token available")
-            return None
-
-        # Check if token is expired
-        if token_storage.is_token_expired():
-            logger.error("OAuth token has expired")
+            logger.error("No valid OAuth token available (refresh may have failed)")
             return None
 
         # Get account_id from token data first, then fall back to env var
@@ -78,16 +77,11 @@ def _get_basecamp_client() -> Optional[BasecampClient]:
 
 def _get_auth_error_response() -> Dict[str, Any]:
     """Return consistent auth error response."""
-    if token_storage.is_token_expired():
-        return {
-            "error": "OAuth token expired",
-            "message": "Your Basecamp OAuth token has expired. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
-        }
-    else:
-        return {
-            "error": "Authentication required", 
-            "message": "Please authenticate with Basecamp first. Visit http://localhost:8000 to log in."
-        }
+    # At this point, ensure_valid_token already tried to refresh
+    return {
+        "error": "Authentication required",
+        "message": "Please authenticate with Basecamp first. Visit http://localhost:8000 to log in. If you were previously authenticated, your token may have expired and could not be refreshed."
+    }
 
 async def _run_sync(func, *args, **kwargs):
     """Wrapper to run synchronous functions in thread pool."""
