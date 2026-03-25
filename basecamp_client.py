@@ -1,7 +1,55 @@
+import json
+import logging
 import os
 
 import requests
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Custom exception hierarchy
+# ---------------------------------------------------------------------------
+
+class BasecampError(Exception):
+    """Base exception for Basecamp API errors."""
+    def __init__(self, message, status_code=None):
+        self.status_code = status_code
+        super().__init__(message)
+
+
+class AuthenticationError(BasecampError):
+    """401 Unauthorized — token expired or invalid."""
+    pass
+
+
+class ForbiddenError(BasecampError):
+    """403 Forbidden — insufficient permissions."""
+    pass
+
+
+class NotFoundError(BasecampError):
+    """404 Not Found — resource does not exist."""
+    pass
+
+
+class RateLimitError(BasecampError):
+    """429 Too Many Requests — rate limited by Basecamp."""
+    def __init__(self, message, retry_after=None, status_code=429):
+        self.retry_after = retry_after
+        super().__init__(message, status_code=status_code)
+
+
+class ServerError(BasecampError):
+    """5xx — Basecamp server-side error."""
+    pass
+
+
+# Safety limit for pagination loops
+MAX_PAGES = 500
+
+# HTTP request timeout in seconds
+REQUEST_TIMEOUT = 30
 
 
 class BasecampClient:
@@ -29,6 +77,9 @@ class BasecampClient:
         self.account_id = account_id or os.getenv('BASECAMP_ACCOUNT_ID')
         self.user_agent = user_agent or os.getenv('USER_AGENT')
 
+        # Create a session for connection pooling
+        self.session = requests.Session()
+
         # Set up authentication based on mode
         if self.auth_mode == 'basic':
             self.username = username or os.getenv('BASECAMP_USERNAME')
@@ -38,10 +89,13 @@ class BasecampClient:
                 raise ValueError("Missing required credentials for Basic Auth. Set them in .env file or pass them to the constructor.")
 
             self.auth = (self.username, self.password)
-            self.headers = {
+            self.session.auth = self.auth
+            self.session.headers.update({
                 "User-Agent": self.user_agent,
                 "Content-Type": "application/json"
-            }
+            })
+            # Keep for backwards compat (used by create_attachment)
+            self.headers = dict(self.session.headers)
 
         elif self.auth_mode == 'oauth':
             self.access_token = access_token or os.getenv('BASECAMP_ACCESS_TOKEN')
@@ -50,11 +104,12 @@ class BasecampClient:
                 raise ValueError("Missing required credentials for OAuth. Set them in .env file or pass them to the constructor.")
 
             self.auth = None  # No basic auth needed for OAuth
-            self.headers = {
+            self.session.headers.update({
                 "User-Agent": self.user_agent,
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.access_token}"
-            }
+            })
+            self.headers = dict(self.session.headers)
 
         else:
             raise ValueError("Invalid auth_mode. Must be 'basic' or 'oauth'")
@@ -62,94 +117,190 @@ class BasecampClient:
         # Basecamp 3 uses a different URL structure
         self.base_url = f"https://3.basecampapi.com/{self.account_id}"
 
+    # ------------------------------------------------------------------
+    # HTTP helpers
+    # ------------------------------------------------------------------
+
+    def _check_response(self, response, context="API call", expected_statuses=(200,)):
+        """Check HTTP response, parse JSON safely, or raise typed exception.
+
+        Args:
+            response: requests.Response object
+            context: Human-readable description for error messages
+            expected_statuses: Tuple of acceptable HTTP status codes
+
+        Returns:
+            Parsed JSON (dict/list) for 200/201, True for 204
+
+        Raises:
+            AuthenticationError, ForbiddenError, NotFoundError,
+            RateLimitError, ServerError, BasecampError
+        """
+        status = response.status_code
+
+        if status in expected_statuses:
+            if status == 204:
+                return True
+            try:
+                return response.json()
+            except (json.JSONDecodeError, ValueError) as e:
+                raise BasecampError(
+                    f"{context}: Invalid JSON in response body — {e}",
+                    status_code=status
+                )
+
+        # Build a safe error snippet (avoid dumping huge HTML pages)
+        try:
+            error_body = response.json()
+            error_detail = json.dumps(error_body)[:300]
+        except Exception:
+            error_detail = response.text[:300]
+
+        if status == 401:
+            raise AuthenticationError(
+                f"{context}: 401 Unauthorized — token may be expired. {error_detail}",
+                status_code=401
+            )
+        elif status == 403:
+            raise ForbiddenError(
+                f"{context}: 403 Forbidden — insufficient permissions. {error_detail}",
+                status_code=403
+            )
+        elif status == 404:
+            raise NotFoundError(
+                f"{context}: 404 Not Found. {error_detail}",
+                status_code=404
+            )
+        elif status == 429:
+            retry_after = response.headers.get('Retry-After')
+            raise RateLimitError(
+                f"{context}: 429 Rate limited. Retry-After: {retry_after}. {error_detail}",
+                retry_after=retry_after
+            )
+        elif status >= 500:
+            raise ServerError(
+                f"{context}: Server error {status}. {error_detail}",
+                status_code=status
+            )
+        else:
+            raise BasecampError(
+                f"{context}: Unexpected HTTP {status}. {error_detail}",
+                status_code=status
+            )
+
     def test_connection(self):
         """Test the connection to Basecamp API."""
         response = self.get('projects.json')
         if response.status_code == 200:
             return True, "Connection successful"
         else:
-            return False, f"Connection failed: {response.status_code} - {response.text}"
+            return False, f"Connection failed: {response.status_code} - {response.text[:200]}"
 
     def get(self, endpoint, params=None):
         """Make a GET request to the Basecamp API."""
         url = f"{self.base_url}/{endpoint}"
-        return requests.get(url, auth=self.auth, headers=self.headers, params=params)
+        return self.session.get(url, params=params, timeout=REQUEST_TIMEOUT)
 
     def post(self, endpoint, data=None):
         """Make a POST request to the Basecamp API."""
         url = f"{self.base_url}/{endpoint}"
-        return requests.post(url, auth=self.auth, headers=self.headers, json=data)
+        return self.session.post(url, json=data, timeout=REQUEST_TIMEOUT)
 
     def put(self, endpoint, data=None):
         """Make a PUT request to the Basecamp API."""
         url = f"{self.base_url}/{endpoint}"
-        return requests.put(url, auth=self.auth, headers=self.headers, json=data)
+        return self.session.put(url, json=data, timeout=REQUEST_TIMEOUT)
 
     def delete(self, endpoint):
         """Make a DELETE request to the Basecamp API."""
         url = f"{self.base_url}/{endpoint}"
-        return requests.delete(url, auth=self.auth, headers=self.headers)
+        return self.session.delete(url, timeout=REQUEST_TIMEOUT)
 
     def patch(self, endpoint, data=None):
         """Make a PATCH request to the Basecamp API."""
         url = f"{self.base_url}/{endpoint}"
-        return requests.patch(url, auth=self.auth, headers=self.headers, json=data)
+        return self.session.patch(url, json=data, timeout=REQUEST_TIMEOUT)
 
+    # ------------------------------------------------------------------
+    # Pagination helper
+    # ------------------------------------------------------------------
+
+    def _fetch_all_pages(self, endpoint, params=None):
+        """Fetch all pages of a paginated list endpoint.
+
+        Follows the Link rel="next" header until exhausted or MAX_PAGES.
+
+        Returns:
+            list: Aggregated items from all pages.
+        """
+        params = dict(params or {})
+        all_items = []
+        page = params.pop("page", 1)
+
+        while page <= MAX_PAGES:
+            params["page"] = page
+            response = self.get(endpoint, params=params)
+            items = self._check_response(response, context=f"GET {endpoint} page={page}")
+
+            if not isinstance(items, list):
+                # Some endpoints may return a dict; return as-is
+                return items
+
+            all_items.extend(items)
+
+            link_header = response.headers.get("Link", "")
+            if not items or 'rel="next"' not in link_header:
+                break
+
+            page += 1
+
+        return all_items
+
+    # ------------------------------------------------------------------
     # Project methods
+    # ------------------------------------------------------------------
+
     def get_projects(self):
         """Get all projects."""
-        response = self.get('projects.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get projects: {response.status_code} - {response.text}")
+        return self._fetch_all_pages('projects.json')
 
     def get_project(self, project_id):
         """Get a specific project by ID."""
         response = self.get(f'projects/{project_id}.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get project: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get project {project_id}")
 
+    # ------------------------------------------------------------------
     # To-do list methods
+    # ------------------------------------------------------------------
+
     def get_todoset(self, project_id):
         """Get the todoset for a project (Basecamp 3 has one todoset per project)."""
         project = self.get_project(project_id)
-        try:
-            return next(_ for _ in project["dock"] if _["name"] == "todoset")
-        except (IndexError, TypeError, StopIteration):
-            raise Exception(f"Failed to get todoset for project: {project.id}. Project response: {project}")
-    
+        dock = project.get("dock")
+        if not isinstance(dock, list):
+            raise BasecampError(f"No dock found in project {project_id}")
+        todoset = next((item for item in dock if item.get("name") == "todoset"), None)
+        if not todoset:
+            raise NotFoundError(f"No todoset found in project {project_id}", status_code=404)
+        return todoset
+
     def get_todolists(self, project_id):
         """Get all todolists for a project."""
-        # First get the todoset ID for this project
         todoset = self.get_todoset(project_id)
         todoset_id = todoset['id']
-
-        # Then get all todolists in this todoset
-        response = self.get(f'buckets/{project_id}/todosets/{todoset_id}/todolists.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get todolists: {response.status_code} - {response.text}")
+        return self._fetch_all_pages(f'buckets/{project_id}/todosets/{todoset_id}/todolists.json')
 
     def get_todolist(self, todolist_id):
         """Get a specific todolist."""
         response = self.get(f'todolists/{todolist_id}.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get todolist: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get todolist {todolist_id}")
 
+    # ------------------------------------------------------------------
     # To-do methods
+    # ------------------------------------------------------------------
+
     def get_todos(self, project_id, todolist_id, completed=None):
         """Get all todos in a todolist, handling pagination.
-
-        Basecamp paginates list endpoints (commonly 15 items per page). This
-        implementation follows pagination via the `page` query parameter and
-        the HTTP `Link` header if present, aggregating all pages before
-        returning the combined list.
 
         Args:
             project_id: Project ID
@@ -158,46 +309,24 @@ class BasecampClient:
                        incomplete todos. If None (default), return incomplete todos
                        (Basecamp API default behavior).
         """
-        endpoint = f'buckets/{project_id}/todolists/{todolist_id}/todos.json'
-
-        all_todos = []
-        page = 1
-
-        while True:
-            params = {"page": page}
-            if completed is not None:
-                params["completed"] = str(completed).lower()
-            response = self.get(endpoint, params=params)
-            if response.status_code != 200:
-                raise Exception(f"Failed to get todos: {response.status_code} - {response.text}")
-
-            page_items = response.json() or []
-            all_todos.extend(page_items)
-
-            # Check for next page using Link header or by empty result
-            link_header = response.headers.get("Link", "")
-            has_next = 'rel="next"' in link_header if link_header else False
-
-            if not page_items or not has_next:
-                break
-
-            page += 1
-
-        return all_todos
+        params = {}
+        if completed is not None:
+            params["completed"] = str(completed).lower()
+        return self._fetch_all_pages(
+            f'buckets/{project_id}/todolists/{todolist_id}/todos.json',
+            params=params
+        )
 
     def get_todo(self, todo_id):
         """Get a specific todo."""
         response = self.get(f'todos/{todo_id}.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get todo: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get todo {todo_id}")
 
     def create_todo(self, project_id, todolist_id, content, description=None, assignee_ids=None,
                     completion_subscriber_ids=None, notify=False, due_on=None, starts_on=None):
         """
         Create a new todo item in a todolist.
-        
+
         Args:
             project_id (str): Project ID
             todolist_id (str): Todolist ID
@@ -208,13 +337,13 @@ class BasecampClient:
             notify (bool, optional): Whether to notify assignees
             due_on (str, optional): Due date in YYYY-MM-DD format
             starts_on (str, optional): Start date in YYYY-MM-DD format
-            
+
         Returns:
             dict: The created todo
         """
         endpoint = f'buckets/{project_id}/todolists/{todolist_id}/todos.json'
         data = {'content': content}
-        
+
         if description is not None:
             data['description'] = description
         if assignee_ids is not None:
@@ -227,18 +356,15 @@ class BasecampClient:
             data['due_on'] = due_on
         if starts_on is not None:
             data['starts_on'] = starts_on
-            
+
         response = self.post(endpoint, data)
-        if response.status_code == 201:
-            return response.json()
-        else:
-            raise Exception(f"Failed to create todo: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Create todo", expected_statuses=(201,))
 
     def update_todo(self, project_id, todo_id, content=None, description=None, assignee_ids=None,
                     completion_subscriber_ids=None, notify=None, due_on=None, starts_on=None):
         """
         Update an existing todo item.
-        
+
         Args:
             project_id (str): Project ID
             todo_id (str): Todo ID
@@ -249,13 +375,13 @@ class BasecampClient:
             notify (bool, optional): Whether to notify assignees
             due_on (str, optional): Due date in YYYY-MM-DD format
             starts_on (str, optional): Start date in YYYY-MM-DD format
-            
+
         Returns:
             dict: The updated todo
         """
         endpoint = f'buckets/{project_id}/todos/{todo_id}.json'
         data = {}
-        
+
         if content is not None:
             data['content'] = content
         if description is not None:
@@ -273,145 +399,116 @@ class BasecampClient:
 
         if not data:
             raise ValueError("No fields provided to update")
-            
+
         response = self.put(endpoint, data)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to update todo: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Update todo {todo_id}")
 
     def delete_todo(self, project_id, todo_id):
         """
         Delete a todo item.
-        
+
         Args:
             project_id (str): Project ID
             todo_id (str): Todo ID
-            
+
         Returns:
             bool: True if successful
         """
         endpoint = f'buckets/{project_id}/todos/{todo_id}.json'
         response = self.delete(endpoint)
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to delete todo: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Delete todo {todo_id}", expected_statuses=(204,))
 
     def complete_todo(self, project_id, todo_id):
         """
         Mark a todo as complete.
-        
+
         Args:
             project_id (str): Project ID
             todo_id (str): Todo ID
-            
+
         Returns:
             dict: Completion details
         """
         endpoint = f'buckets/{project_id}/todos/{todo_id}/completion.json'
         response = self.post(endpoint)
-        if response.status_code == 201:
-            return response.json()
-        else:
-            raise Exception(f"Failed to complete todo: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Complete todo {todo_id}", expected_statuses=(201,))
 
     def uncomplete_todo(self, project_id, todo_id):
         """
         Mark a todo as incomplete.
-        
+
         Args:
             project_id (str): Project ID
             todo_id (str): Todo ID
-            
+
         Returns:
             bool: True if successful
         """
         endpoint = f'buckets/{project_id}/todos/{todo_id}/completion.json'
         response = self.delete(endpoint)
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to uncomplete todo: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Uncomplete todo {todo_id}", expected_statuses=(204,))
 
+    # ------------------------------------------------------------------
     # People methods
+    # ------------------------------------------------------------------
+
     def get_people(self):
         """Get all people in the account."""
-        response = self.get('people.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get people: {response.status_code} - {response.text}")
+        return self._fetch_all_pages('people.json')
 
+    # ------------------------------------------------------------------
     # Campfire (chat) methods
+    # ------------------------------------------------------------------
+
     def get_campfires(self, project_id):
         """Get the campfire for a project."""
         response = self.get(f'buckets/{project_id}/chats.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get campfire: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get campfires for project {project_id}")
 
     def get_campfire_lines(self, project_id, campfire_id):
         """Get chat lines from a campfire."""
-        response = self.get(f'buckets/{project_id}/chats/{campfire_id}/lines.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get campfire lines: {response.status_code} - {response.text}")
+        return self._fetch_all_pages(f'buckets/{project_id}/chats/{campfire_id}/lines.json')
 
+    # ------------------------------------------------------------------
     # Message board methods
+    # ------------------------------------------------------------------
+
     def get_message_board(self, project_id):
         """Get the message board for a project."""
-        # Get project to find message board ID in dock
         project = self.get_project(project_id)
-        message_board_tool = None
 
+        message_board_tool = None
         for tool in project.get('dock', []):
             if tool.get('name') == 'message_board':
                 message_board_tool = tool
                 break
 
         if not message_board_tool:
-            raise Exception(f"Message board not enabled for project {project_id}")
+            raise NotFoundError(f"Message board not enabled for project {project_id}", status_code=404)
 
         message_board_id = message_board_tool.get('id')
         response = self.get(f'buckets/{project_id}/message_boards/{message_board_id}.json')
-
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get message board: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get message board for project {project_id}")
 
     def get_messages(self, project_id):
         """Get all messages for a project."""
-        # First get the message board
         message_board = self.get_message_board(project_id)
         message_board_id = message_board['id']
-
-        # Get messages from the message board
-        response = self.get(f'buckets/{project_id}/message_boards/{message_board_id}/messages.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get messages: {response.status_code} - {response.text}")
+        return self._fetch_all_pages(f'buckets/{project_id}/message_boards/{message_board_id}/messages.json')
 
     def get_message(self, project_id, message_id):
         """Get a single message by ID."""
         response = self.get(f'buckets/{project_id}/messages/{message_id}.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get message: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get message {message_id}")
 
+    # ------------------------------------------------------------------
     # Schedule methods
+    # ------------------------------------------------------------------
+
     def get_schedule(self, project_id):
         """Get the schedule for a project."""
         response = self.get(f'projects/{project_id}/schedule.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get schedule: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get schedule for project {project_id}")
 
     def get_schedule_entries(self, project_id):
         """
@@ -423,37 +520,33 @@ class BasecampClient:
         Returns:
             list: Schedule entries
         """
-        try:
-            endpoint = f"buckets/{project_id}/schedules.json"
-            schedule = self.get(endpoint)
+        endpoint = f"buckets/{project_id}/schedules.json"
+        response = self.get(endpoint)
+        schedule = self._check_response(response, context=f"Get schedules for project {project_id}")
 
-            if isinstance(schedule, list) and len(schedule) > 0:
-                schedule_id = schedule[0]['id']
-                entries_endpoint = f"buckets/{project_id}/schedules/{schedule_id}/entries.json"
-                return self.get(entries_endpoint)
-            else:
-                return []
-        except Exception as e:
-            raise Exception(f"Failed to get schedule: {str(e)}")
+        if isinstance(schedule, list) and len(schedule) > 0:
+            schedule_id = schedule[0]['id']
+            entries_endpoint = f"buckets/{project_id}/schedules/{schedule_id}/entries.json"
+            return self._fetch_all_pages(entries_endpoint)
+        else:
+            return []
 
+    # ------------------------------------------------------------------
     # Comments methods
+    # ------------------------------------------------------------------
+
     def get_comments(self, project_id, recording_id):
         """
-        Get all comments for a recording (todos, message, etc.).
-        
+        Get all comments for a recording (todo, message, etc.).
+
         Args:
-            recording_id (int): ID of the recording (todos, message, etc.)
-            project_id (int): Project/bucket ID. If not provided, it will be extracted from the recording ID.
-            
+            recording_id (int): ID of the recording (todo, message, etc.)
+            project_id (int): Project/bucket ID
+
         Returns:
             list: Comments for the recording
         """
-        endpoint = f"buckets/{project_id}/recordings/{recording_id}/comments.json"
-        response = self.get(endpoint)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get comments: {response.status_code} - {response.text}")
+        return self._fetch_all_pages(f"buckets/{project_id}/recordings/{recording_id}/comments.json")
 
     def create_comment(self, recording_id, bucket_id, content):
         """
@@ -470,10 +563,7 @@ class BasecampClient:
         endpoint = f"buckets/{bucket_id}/recordings/{recording_id}/comments.json"
         data = {"content": content}
         response = self.post(endpoint, data)
-        if response.status_code == 201:
-            return response.json()
-        else:
-            raise Exception(f"Failed to create comment: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Create comment", expected_statuses=(201,))
 
     def get_comment(self, comment_id, bucket_id):
         """
@@ -488,10 +578,7 @@ class BasecampClient:
         """
         endpoint = f"buckets/{bucket_id}/comments/{comment_id}.json"
         response = self.get(endpoint)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get comment: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get comment {comment_id}")
 
     def update_comment(self, comment_id, bucket_id, content):
         """
@@ -508,10 +595,7 @@ class BasecampClient:
         endpoint = f"buckets/{bucket_id}/comments/{comment_id}.json"
         data = {"content": content}
         response = self.put(endpoint, data)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to update comment: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Update comment {comment_id}")
 
     def delete_comment(self, comment_id, bucket_id):
         """
@@ -526,157 +610,129 @@ class BasecampClient:
         """
         endpoint = f"buckets/{bucket_id}/comments/{comment_id}.json"
         response = self.delete(endpoint)
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to delete comment: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Delete comment {comment_id}", expected_statuses=(204,))
+
+    # ------------------------------------------------------------------
+    # Daily check-in methods
+    # ------------------------------------------------------------------
 
     def get_daily_check_ins(self, project_id, page=1):
         project = self.get_project(project_id)
-        questionnaire = next(_ for _ in project["dock"] if _["name"] == "questionnaire")
+        dock = project.get("dock", [])
+        questionnaire = next((item for item in dock if item.get("name") == "questionnaire"), None)
+        if not questionnaire:
+            raise NotFoundError(f"No questionnaire found in project {project_id}", status_code=404)
         endpoint = f"buckets/{project_id}/questionnaires/{questionnaire['id']}/questions.json"
         response = self.get(endpoint, params={"page": page})
-        if response.status_code != 200:
-            raise Exception("Failed to read questions")
-        return response.json()
+        return self._check_response(response, context="Get daily check-ins")
 
     def get_question_answers(self, project_id, question_id, page=1):
         endpoint = f"buckets/{project_id}/questions/{question_id}/answers.json"
         response = self.get(endpoint, params={"page": page})
-        if response.status_code != 200:
-            raise Exception("Failed to read question answers")
-        return response.json()
+        return self._check_response(response, context=f"Get answers for question {question_id}")
 
+    # ------------------------------------------------------------------
     # Card Table methods
+    # ------------------------------------------------------------------
+
     def get_card_tables(self, project_id):
         """Get all card tables for a project."""
         project = self.get_project(project_id)
-        try:
-            return [item for item in project["dock"] if item.get("name") in ("kanban_board", "card_table")]
-        except (IndexError, TypeError):
-            return []
+        dock = project.get("dock", [])
+        return [item for item in dock if item.get("name") in ("kanban_board", "card_table")]
 
     def get_card_table(self, project_id):
         """Get the first card table for a project (Basecamp 3 can have multiple card tables per project)."""
         card_tables = self.get_card_tables(project_id)
         if not card_tables:
-            raise Exception(f"No card tables found for project: {project_id}")
-        return card_tables[0]  # Return the first card table
-    
+            raise NotFoundError(f"No card tables found for project {project_id}", status_code=404)
+        return card_tables[0]
+
     def get_card_table_details(self, project_id, card_table_id):
         """Get details for a specific card table."""
         response = self.get(f'buckets/{project_id}/card_tables/{card_table_id}.json')
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 204:
-            # 204 means "No Content" - return an empty structure
-            return {"lists": [], "id": card_table_id, "status": "empty"}
-        else:
-            raise Exception(f"Failed to get card table: {response.status_code} - {response.text}")
+        return self._check_response(
+            response, context=f"Get card table {card_table_id}",
+            expected_statuses=(200, 204)
+        )
 
+    # ------------------------------------------------------------------
     # Card Table Column methods
+    # ------------------------------------------------------------------
+
     def get_columns(self, project_id, card_table_id):
         """Get all columns in a card table."""
-        # Get the card table details which includes the lists (columns)
         card_table_details = self.get_card_table_details(project_id, card_table_id)
+        if card_table_details is True:
+            # 204 No Content
+            return []
         return card_table_details.get('lists', [])
 
     def get_column(self, project_id, column_id):
         """Get a specific column."""
         response = self.get(f'buckets/{project_id}/card_tables/columns/{column_id}.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get column: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get column {column_id}")
 
     def create_column(self, project_id, card_table_id, title):
         """Create a new column in a card table."""
         data = {"title": title}
         response = self.post(f'buckets/{project_id}/card_tables/{card_table_id}/columns.json', data)
-        if response.status_code == 201:
-            return response.json()
-        else:
-            raise Exception(f"Failed to create column: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Create column", expected_statuses=(201,))
 
     def update_column(self, project_id, column_id, title):
         """Update a column title."""
         data = {"title": title}
         response = self.put(f'buckets/{project_id}/card_tables/columns/{column_id}.json', data)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to update column: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Update column {column_id}")
 
     def move_column(self, project_id, column_id, position, card_table_id):
         """Move a column to a new position."""
         data = {
-            "source_id": column_id, 
+            "source_id": column_id,
             "target_id": card_table_id,
             "position": position
         }
         response = self.post(f'buckets/{project_id}/card_tables/{card_table_id}/moves.json', data)
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to move column: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Move column", expected_statuses=(204,))
 
     def update_column_color(self, project_id, column_id, color):
         """Update a column color."""
         data = {"color": color}
         response = self.patch(f'buckets/{project_id}/card_tables/columns/{column_id}/color.json', data)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to update column color: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Update column {column_id} color")
 
     def put_column_on_hold(self, project_id, column_id):
         """Put a column on hold."""
         response = self.post(f'buckets/{project_id}/card_tables/columns/{column_id}/on_hold.json')
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to put column on hold: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Put column on hold", expected_statuses=(204,))
 
     def remove_column_hold(self, project_id, column_id):
         """Remove hold from a column."""
         response = self.delete(f'buckets/{project_id}/card_tables/columns/{column_id}/on_hold.json')
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to remove column hold: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Remove column hold", expected_statuses=(204,))
 
     def watch_column(self, project_id, column_id):
         """Subscribe to column notifications."""
         response = self.post(f'buckets/{project_id}/card_tables/lists/{column_id}/subscription.json')
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to watch column: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Watch column", expected_statuses=(204,))
 
     def unwatch_column(self, project_id, column_id):
         """Unsubscribe from column notifications."""
         response = self.delete(f'buckets/{project_id}/card_tables/lists/{column_id}/subscription.json')
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to unwatch column: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Unwatch column", expected_statuses=(204,))
 
+    # ------------------------------------------------------------------
     # Card Table Card methods
+    # ------------------------------------------------------------------
+
     def get_cards(self, project_id, column_id):
         """Get all cards in a column."""
-        response = self.get(f'buckets/{project_id}/card_tables/lists/{column_id}/cards.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get cards: {response.status_code} - {response.text}")
+        return self._fetch_all_pages(f'buckets/{project_id}/card_tables/lists/{column_id}/cards.json')
 
     def get_card(self, project_id, card_id):
         """Get a specific card."""
         response = self.get(f'buckets/{project_id}/card_tables/cards/{card_id}.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get card: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get card {card_id}")
 
     def create_card(self, project_id, column_id, title, content=None, due_on=None, notify=False):
         """Create a new card in a column."""
@@ -688,10 +744,7 @@ class BasecampClient:
         if notify:
             data["notify"] = notify
         response = self.post(f'buckets/{project_id}/card_tables/lists/{column_id}/cards.json', data)
-        if response.status_code == 201:
-            return response.json()
-        else:
-            raise Exception(f"Failed to create card: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Create card", expected_statuses=(201,))
 
     def update_card(self, project_id, card_id, title=None, content=None, due_on=None, assignee_ids=None):
         """Update a card."""
@@ -705,37 +758,28 @@ class BasecampClient:
         if assignee_ids:
             data["assignee_ids"] = assignee_ids
         response = self.put(f'buckets/{project_id}/card_tables/cards/{card_id}.json', data)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to update card: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Update card {card_id}")
 
     def move_card(self, project_id, card_id, column_id):
         """Move a card to a new column."""
         data = {"column_id": column_id}
         response = self.post(f'buckets/{project_id}/card_tables/cards/{card_id}/moves.json', data)
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to move card: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Move card", expected_statuses=(204,))
 
     def complete_card(self, project_id, card_id):
         """Mark a card as complete."""
         response = self.post(f'buckets/{project_id}/todos/{card_id}/completion.json')
-        if response.status_code == 201:
-            return response.json()
-        else:
-            raise Exception(f"Failed to complete card: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Complete card {card_id}", expected_statuses=(201,))
 
     def uncomplete_card(self, project_id, card_id):
         """Mark a card as incomplete."""
         response = self.delete(f'buckets/{project_id}/todos/{card_id}/completion.json')
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to uncomplete card: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Uncomplete card {card_id}", expected_statuses=(204,))
 
+    # ------------------------------------------------------------------
     # Card Steps methods
+    # ------------------------------------------------------------------
+
     def get_card_steps(self, project_id, card_id):
         """Get all steps (sub-tasks) for a card."""
         card = self.get_card(project_id, card_id)
@@ -749,18 +793,12 @@ class BasecampClient:
         if assignee_ids:
             data["assignee_ids"] = assignee_ids
         response = self.post(f'buckets/{project_id}/card_tables/cards/{card_id}/steps.json', data)
-        if response.status_code == 201:
-            return response.json()
-        else:
-            raise Exception(f"Failed to create card step: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Create card step", expected_statuses=(201,))
 
     def get_card_step(self, project_id, step_id):
         """Get a specific card step."""
         response = self.get(f'buckets/{project_id}/card_tables/steps/{step_id}.json')
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get card step: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get card step {step_id}")
 
     def update_card_step(self, project_id, step_id, title=None, due_on=None, assignee_ids=None):
         """Update a card step."""
@@ -772,69 +810,58 @@ class BasecampClient:
         if assignee_ids:
             data["assignee_ids"] = assignee_ids
         response = self.put(f'buckets/{project_id}/card_tables/steps/{step_id}.json', data)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to update card step: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Update card step {step_id}")
 
     def delete_card_step(self, project_id, step_id):
         """Delete a card step."""
         response = self.delete(f'buckets/{project_id}/card_tables/steps/{step_id}.json')
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to delete card step: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Delete card step {step_id}", expected_statuses=(204,))
 
     def complete_card_step(self, project_id, step_id):
         """Mark a card step as complete."""
         response = self.post(f'buckets/{project_id}/todos/{step_id}/completion.json')
-        if response.status_code == 201:
-            return response.json()
-        else:
-            raise Exception(f"Failed to complete card step: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Complete card step {step_id}", expected_statuses=(201,))
 
     def uncomplete_card_step(self, project_id, step_id):
         """Mark a card step as incomplete."""
         response = self.delete(f'buckets/{project_id}/todos/{step_id}/completion.json')
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to uncomplete card step: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Uncomplete card step {step_id}", expected_statuses=(204,))
 
-    # New methods for additional Basecamp API functionality
+    # ------------------------------------------------------------------
+    # Attachment methods
+    # ------------------------------------------------------------------
+
     def create_attachment(self, file_path, name, content_type="application/octet-stream"):
         """Upload an attachment and return the attachable sgid."""
         with open(file_path, "rb") as f:
             data = f.read()
 
-        headers = self.headers.copy()
+        headers = dict(self.session.headers)
         headers["Content-Type"] = content_type
         headers["Content-Length"] = str(len(data))
 
         endpoint = f"attachments.json?name={name}"
-        response = requests.post(f"{self.base_url}/{endpoint}", auth=self.auth, headers=headers, data=data)
-        if response.status_code == 201:
-            return response.json()
-        else:
-            raise Exception(f"Failed to create attachment: {response.status_code} - {response.text}")
+        # Use raw requests.post here since we need custom headers and binary data
+        response = requests.post(
+            f"{self.base_url}/{endpoint}",
+            auth=self.session.auth,
+            headers=headers,
+            data=data,
+            timeout=REQUEST_TIMEOUT
+        )
+        return self._check_response(response, context="Create attachment", expected_statuses=(201,))
+
+    # ------------------------------------------------------------------
+    # Events & Webhooks
+    # ------------------------------------------------------------------
 
     def get_events(self, project_id, recording_id):
         """Get events for a recording."""
-        endpoint = f"buckets/{project_id}/recordings/{recording_id}/events.json"
-        response = self.get(endpoint)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get events: {response.status_code} - {response.text}")
+        return self._fetch_all_pages(f"buckets/{project_id}/recordings/{recording_id}/events.json")
 
     def get_webhooks(self, project_id):
         """List webhooks for a project."""
-        endpoint = f"buckets/{project_id}/webhooks.json"
-        response = self.get(endpoint)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get webhooks: {response.status_code} - {response.text}")
+        return self._fetch_all_pages(f"buckets/{project_id}/webhooks.json")
 
     def create_webhook(self, project_id, payload_url, types=None):
         """Create a webhook for a project."""
@@ -843,47 +870,34 @@ class BasecampClient:
             data["types"] = types
         endpoint = f"buckets/{project_id}/webhooks.json"
         response = self.post(endpoint, data)
-        if response.status_code == 201:
-            return response.json()
-        else:
-            raise Exception(f"Failed to create webhook: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Create webhook", expected_statuses=(201,))
 
     def delete_webhook(self, project_id, webhook_id):
         """Delete a webhook."""
         endpoint = f"buckets/{project_id}/webhooks/{webhook_id}.json"
         response = self.delete(endpoint)
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to delete webhook: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Delete webhook {webhook_id}", expected_statuses=(204,))
+
+    # ------------------------------------------------------------------
+    # Document methods
+    # ------------------------------------------------------------------
 
     def get_documents(self, project_id, vault_id):
         """List documents in a vault."""
-        endpoint = f"buckets/{project_id}/vaults/{vault_id}/documents.json"
-        response = self.get(endpoint)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get documents: {response.status_code} - {response.text}")
+        return self._fetch_all_pages(f"buckets/{project_id}/vaults/{vault_id}/documents.json")
 
     def get_document(self, project_id, document_id):
         """Get a single document."""
         endpoint = f"buckets/{project_id}/documents/{document_id}.json"
         response = self.get(endpoint)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get document: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get document {document_id}")
 
     def create_document(self, project_id, vault_id, title, content, status="active"):
         """Create a document in a vault."""
         data = {"title": title, "content": content, "status": status}
         endpoint = f"buckets/{project_id}/vaults/{vault_id}/documents.json"
         response = self.post(endpoint, data)
-        if response.status_code == 201:
-            return response.json()
-        else:
-            raise Exception(f"Failed to create document: {response.status_code} - {response.text}")
+        return self._check_response(response, context="Create document", expected_statuses=(201,))
 
     def update_document(self, project_id, document_id, title=None, content=None):
         """Update a document's title or content."""
@@ -894,43 +908,36 @@ class BasecampClient:
             data["content"] = content
         endpoint = f"buckets/{project_id}/documents/{document_id}.json"
         response = self.put(endpoint, data)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to update document: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Update document {document_id}")
 
     def trash_document(self, project_id, document_id):
         """Trash a document."""
         endpoint = f"buckets/{project_id}/recordings/{document_id}/status/trashed.json"
         response = self.put(endpoint)
-        if response.status_code == 204:
-            return True
-        else:
-            raise Exception(f"Failed to trash document: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Trash document {document_id}", expected_statuses=(204,))
 
+    # ------------------------------------------------------------------
     # Upload methods
+    # ------------------------------------------------------------------
+
     def get_uploads(self, project_id, vault_id=None):
         """List uploads in a project or vault."""
         if vault_id:
             endpoint = f"buckets/{project_id}/vaults/{vault_id}/uploads.json"
         else:
             endpoint = f"buckets/{project_id}/uploads.json"
-        response = self.get(endpoint)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get uploads: {response.status_code} - {response.text}")
+        return self._fetch_all_pages(endpoint)
 
     def get_upload(self, project_id, upload_id):
         """Get a single upload."""
         endpoint = f"buckets/{project_id}/uploads/{upload_id}.json"
         response = self.get(endpoint)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get upload: {response.status_code} - {response.text}")
+        return self._check_response(response, context=f"Get upload {upload_id}")
 
+    # ------------------------------------------------------------------
     # Search methods
+    # ------------------------------------------------------------------
+
     def search(self, query, page=1):
         """
         Search across all Basecamp content using the native search API.
@@ -941,33 +948,18 @@ class BasecampClient:
 
         Returns:
             dict: Search results with 'results' list and optional 'next_page' indicator
-
-        Note:
-            The search API returns various content types including:
-            - Comments
-            - Messages
-            - Todos
-            - Cards
-            - Documents
-            - Uploads
-            And more...
         """
-        endpoint = f"search.json"
+        endpoint = "search.json"
         params = {"query": query, "page": page}
         response = self.get(endpoint, params=params)
+        results = self._check_response(response, context=f"Search '{query}'")
 
-        if response.status_code == 200:
-            results = response.json()
-
-            # Check for pagination in Link header
-            result_dict = {"results": results}
-            link_header = response.headers.get('Link', '')
-            if 'rel="next"' in link_header:
-                result_dict['has_next_page'] = True
-                result_dict['next_page'] = page + 1
-            else:
-                result_dict['has_next_page'] = False
-
-            return result_dict
+        result_dict = {"results": results}
+        link_header = response.headers.get('Link', '')
+        if 'rel="next"' in link_header:
+            result_dict['has_next_page'] = True
+            result_dict['next_page'] = page + 1
         else:
-            raise Exception(f"Failed to search: {response.status_code} - {response.text}")
+            result_dict['has_next_page'] = False
+
+        return result_dict

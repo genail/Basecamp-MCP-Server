@@ -144,7 +144,7 @@ class TestBasecampClientCardTables(unittest.TestCase):
         """Test that patch method exists."""
         self.assertTrue(hasattr(self.client, 'patch'))
         
-    @patch('requests.get')
+    @patch('requests.Session.get')
     def test_get_card_table(self, mock_get):
         """Test getting card table from project dock."""
         mock_response = Mock()
@@ -164,7 +164,7 @@ class TestBasecampClientCardTables(unittest.TestCase):
         self.assertEqual(result['name'], 'card_table')
         self.assertEqual(result['id'], '222')
         
-    @patch('requests.post')
+    @patch('requests.Session.post')
     def test_create_column(self, mock_post):
         """Test creating a column."""
         mock_response = Mock()
@@ -183,7 +183,7 @@ class TestBasecampClientCardTables(unittest.TestCase):
         call_args = mock_post.call_args
         self.assertEqual(call_args[1]['json'], {'title': 'New Column'})
         
-    @patch('requests.patch')
+    @patch('requests.Session.patch')
     def test_update_column_color(self, mock_patch):
         """Test updating column color."""
         mock_response = Mock()
