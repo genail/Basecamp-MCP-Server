@@ -387,11 +387,16 @@ async def get_todos(
 ) -> Dict[str, Any]:
     """Get todos from a todo list.
 
-    Results are paginated and summarized by default for optimal token usage.
+    Workflow: First call get_todolists(project_id) to discover todolist IDs,
+    then call this tool with the returned todolist_id.
+
+    Results are paginated and summarized by default. Summarized fields: id, content,
+    status, assignee names, due_on, creator, dates, URLs. Use raw_response=True if
+    you need assignee IDs, email addresses, or full descriptions.
 
     Args:
         project_id: Project ID
-        todolist_id: The todo list ID
+        todolist_id: The todo list ID (from get_todolists results)
         completed: Filter by completion status. True = only completed, False = only incomplete,
                    None (default) = incomplete only (Basecamp API default).
         page: Page number (default: 1, 1-based)
@@ -762,13 +767,15 @@ async def get_comments(
     max_results: Optional[int] = 16,
     raw_response: Optional[bool] = False
 ) -> Dict[str, Any]:
-    """Get comments for a Basecamp item.
+    """Get comments for a Basecamp item (todo, message, card, document, etc.).
 
-    Results are paginated and summarized by default for optimal token usage.
+    In Basecamp, any item that can have comments is called a "recording".
+    The recording_id is the ID of the todo, message, card, or document you
+    want to read comments for.
 
     Args:
-        recording_id: The item ID
-        project_id: The project ID
+        recording_id: The ID of the item (todo, message, card, document, etc.)
+        project_id: The project ID containing the item
         page: Page number (default: 1, 1-based)
         max_results: Maximum results per page (default: 16, hard limit: 16)
         raw_response: If True, return complete API response without summarization (default: False)
@@ -948,7 +955,8 @@ async def get_campfire_lines(
 ) -> Dict[str, Any]:
     """Get recent messages from a Basecamp campfire (chat room).
 
-    Results are paginated and summarized by default for optimal token usage.
+    Workflow: First call get_campfires(project_id) to discover campfire IDs,
+    then call this tool with the returned campfire_id.
 
     Args:
         project_id: The project ID
@@ -1261,9 +1269,11 @@ async def get_cards(
     max_results: Optional[int] = 16,
     raw_response: Optional[bool] = False
 ) -> Dict[str, Any]:
-    """Get all cards in a column.
+    """Get all cards in a kanban column.
 
-    Results are paginated and summarized by default for optimal token usage.
+    Workflow: First call get_card_table(project_id) to get the card table,
+    then get_columns(project_id, card_table_id) to discover column IDs,
+    then call this tool with the returned column_id.
 
     Args:
         project_id: The project ID
@@ -2304,11 +2314,12 @@ async def get_documents(
 ) -> Dict[str, Any]:
     """List documents in a vault.
 
-    Results are paginated and summarized by default for optimal token usage.
+    Workflow: First call get_vaults(project_id) to discover the root vault ID,
+    then call this tool with the returned vault_id.
 
     Args:
         project_id: Project ID
-        vault_id: Vault ID
+        vault_id: Vault ID (from get_vaults results)
         page: Page number (default: 1)
         max_results: Maximum results per page (default: 16, hard limit: 16)
         raw_response: If True, return complete API response (default: False)
@@ -2528,11 +2539,11 @@ async def get_uploads(
 ) -> Dict[str, Any]:
     """List uploads in a project or vault.
 
-    Results are paginated and summarized by default for optimal token usage.
+    Optionally filter by vault. Use get_vaults(project_id) to discover vault IDs.
 
     Args:
         project_id: Project ID
-        vault_id: Optional vault ID to limit to specific vault
+        vault_id: Optional vault ID to limit to specific vault (from get_vaults results)
         page: Page number (default: 1)
         max_results: Maximum results per page (default: 16, hard limit: 16)
         raw_response: If True, return complete API response (default: False)
