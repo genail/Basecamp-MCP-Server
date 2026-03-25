@@ -49,7 +49,7 @@ def _get_basecamp_client() -> Optional[BasecampClient]:
     try:
         # Use ensure_valid_token which auto-refreshes if needed
         token_data = token_storage.ensure_valid_token()
-        logger.debug(f"Token data retrieved: {token_data}")
+        logger.debug(f"Token data retrieved: token_exists={token_data is not None}, has_access_token={bool(token_data.get('access_token') if token_data else False)}")
 
         if not token_data or not token_data.get('access_token'):
             logger.error("No valid OAuth token available (refresh may have failed)")

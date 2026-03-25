@@ -226,7 +226,7 @@ def auth_callback():
         oauth_client = get_oauth_client()
         logger.info("Exchanging code for token")
         token_data = oauth_client.exchange_code_for_token(code)
-        logger.info(f"Raw token data from Basecamp exchange: {token_data}")
+        logger.info(f"Token exchange successful: keys={list(token_data.keys()) if token_data else 'None'}")
 
         # Store the token in our secure storage
         access_token = token_data.get('access_token')
@@ -303,12 +303,19 @@ def get_token_api():
     Secure API endpoint for the MCP server to get the token.
     This should only be accessible by the MCP server.
     """
-    logger.info("Token API called with headers: %s", request.headers)
+    logger.info("Token API called")
 
     # In production, implement proper authentication for this endpoint
     # For now, we'll use a simple API key check
     api_key = request.headers.get('X-API-Key')
-    if not api_key or api_key != os.getenv('MCP_API_KEY', 'mcp_secret_key'):
+    mcp_api_key = os.getenv('MCP_API_KEY')
+    if not mcp_api_key:
+        logger.error("Token API: MCP_API_KEY environment variable not set")
+        return jsonify({
+            "error": "Server misconfigured",
+            "message": "MCP_API_KEY environment variable not set"
+        }), 500
+    if not api_key or api_key != mcp_api_key:
         logger.error("Token API: Invalid API key")
         return jsonify({
             "error": "Unauthorized",
