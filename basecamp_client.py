@@ -879,6 +879,25 @@ class BasecampClient:
         return self._check_response(response, context=f"Delete webhook {webhook_id}", expected_statuses=(204,))
 
     # ------------------------------------------------------------------
+    # Vault methods
+    # ------------------------------------------------------------------
+
+    def get_vaults(self, project_id):
+        """Get the root vault (Docs & Files) for a project, including child vaults.
+
+        Returns the vault object which contains nested vaults. Use the vault ID
+        with get_documents() and get_uploads().
+        """
+        project = self.get_project(project_id)
+        dock = project.get("dock", [])
+        vault_tool = next((item for item in dock if item.get("name") == "vault"), None)
+        if not vault_tool:
+            raise NotFoundError(f"No vault (Docs & Files) found in project {project_id}", status_code=404)
+        vault_id = vault_tool.get("id")
+        response = self.get(f'buckets/{project_id}/vaults/{vault_id}.json')
+        return self._check_response(response, context=f"Get vault for project {project_id}")
+
+    # ------------------------------------------------------------------
     # Document methods
     # ------------------------------------------------------------------
 

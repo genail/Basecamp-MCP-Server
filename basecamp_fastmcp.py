@@ -189,6 +189,71 @@ async def get_project(project_id: str) -> Dict[str, Any]:
         }
 
 @mcp.tool()
+async def get_people(
+    page: Optional[int] = 1,
+    max_results: Optional[int] = 64,
+    raw_response: Optional[bool] = False
+) -> Dict[str, Any]:
+    """Get all people in the Basecamp account.
+
+    Returns names, IDs, and email addresses. Use the returned person IDs
+    when assigning todos (assignee_ids) or cards.
+
+    Args:
+        page: Page number (default: 1, 1-based)
+        max_results: Maximum results per page (default: 64, hard limit: 64)
+        raw_response: If True, return complete API response without summarization (default: False)
+    """
+    from response_helpers import HARD_LIMITS, create_pagination_info
+
+    client = _get_basecamp_client()
+    if not client:
+        return _get_auth_error_response()
+
+    try:
+        HARD_LIMIT = HARD_LIMITS["todos"]  # reuse 64 limit
+        warning = None
+        if max_results > HARD_LIMIT:
+            warning = f"Requested {max_results} results, but limited to {HARD_LIMIT}."
+            max_results = HARD_LIMIT
+
+        all_people = await _run_sync(client.get_people)
+
+        start_idx = (page - 1) * max_results
+        end_idx = start_idx + max_results
+        page_people = all_people[start_idx:end_idx]
+        has_more = end_idx < len(all_people)
+
+        if not raw_response:
+            page_people = [
+                {
+                    "id": p.get("id"),
+                    "name": p.get("name"),
+                    "email_address": p.get("email_address"),
+                    "admin": p.get("admin"),
+                    "avatar_url": p.get("avatar_url"),
+                }
+                for p in page_people
+            ]
+
+        pagination = create_pagination_info(page, len(page_people), HARD_LIMIT, has_more)
+
+        result = {
+            "status": "success",
+            "pagination": pagination,
+            "people": page_people,
+        }
+        if warning:
+            result["warning"] = warning
+        if has_more:
+            result["note"] = f"More results available. Request page={page + 1}."
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting people: {e}")
+        return {"status": "error", "error": "Execution error", "message": str(e)}
+
+@mcp.tool()
 async def search_basecamp(query: str, page: Optional[int] = 1, max_results: Optional[int] = 16) -> Dict[str, Any]:
     """Search across all Basecamp content using native search API.
 
@@ -690,51 +755,6 @@ async def uncomplete_todo(project_id: str, todo_id: str) -> Dict[str, Any]:
         }
 
 @mcp.tool()
-async def global_search(query: str, page: Optional[int] = 1, max_results: Optional[int] = 16) -> Dict[str, Any]:
-    """Search across all Basecamp content using native search API.
-
-    This is an alias for search_basecamp() for backward compatibility.
-    Searches across all content types including comments, messages, todos,
-    cards, documents, uploads, and campfire/chat messages.
-
-    Returns summarized results with id, type, title, preview (truncated), and URLs.
-    Use get_comments, get_card, get_document, etc. with the returned IDs to fetch full details.
-
-    Results are paginated with a hard limit of 16 results per page.
-
-    Args:
-        query: Search query string
-        page: Page number to fetch (default: 1, 1-based)
-        max_results: Maximum number of results to return (default: 16, hard limit: 16)
-    """
-    client = _get_basecamp_client()
-    if not client:
-        return _get_auth_error_response()
-
-    try:
-        search = BasecampSearch(client=client)
-        # Use native search API which is much faster and more comprehensive
-        result = await _run_sync(
-            lambda: search.native_search(query, page=page, max_results=max_results)
-        )
-
-        # Return the full result which includes status, query, pagination, results, note, and optional warning
-        return result
-    except Exception as e:
-        logger.error(f"Error in global search: {e}")
-        if "401" in str(e) and "expired" in str(e).lower():
-            return {
-                "status": "error",
-                "error": "OAuth token expired",
-                "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
-            }
-        return {
-            "status": "error",
-            "error": "Execution error",
-            "message": str(e)
-        }
-
-@mcp.tool()
 async def get_comments(
     recording_id: str,
     project_id: str,
@@ -839,6 +859,84 @@ async def create_comment(recording_id: str, project_id: str, content: str) -> Di
             "error": "Execution error",
             "message": str(e)
         }
+
+@mcp.tool()
+async def get_comment(comment_id: str, project_id: str) -> Dict[str, Any]:
+    """Get a specific comment by ID.
+
+    Args:
+        comment_id: The comment ID
+        project_id: The project/bucket ID containing the comment
+    """
+    client = _get_basecamp_client()
+    if not client:
+        return _get_auth_error_response()
+
+    try:
+        comment = await _run_sync(client.get_comment, comment_id, project_id)
+        return {"status": "success", "comment": comment}
+    except Exception as e:
+        logger.error(f"Error getting comment: {e}")
+        return {"status": "error", "error": "Execution error", "message": str(e)}
+
+@mcp.tool()
+async def update_comment(comment_id: str, project_id: str, content: str) -> Dict[str, Any]:
+    """Update an existing comment.
+
+    Args:
+        comment_id: The comment ID to update
+        project_id: The project/bucket ID containing the comment
+        content: New HTML content for the comment
+    """
+    client = _get_basecamp_client()
+    if not client:
+        return _get_auth_error_response()
+
+    try:
+        comment = await _run_sync(client.update_comment, comment_id, project_id, content)
+        return {"status": "success", "comment": comment, "message": "Comment updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating comment: {e}")
+        return {"status": "error", "error": "Execution error", "message": str(e)}
+
+@mcp.tool()
+async def delete_comment(comment_id: str, project_id: str) -> Dict[str, Any]:
+    """Delete a comment.
+
+    Args:
+        comment_id: The comment ID to delete
+        project_id: The project/bucket ID containing the comment
+    """
+    client = _get_basecamp_client()
+    if not client:
+        return _get_auth_error_response()
+
+    try:
+        await _run_sync(client.delete_comment, comment_id, project_id)
+        return {"status": "success", "message": f"Comment {comment_id} deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting comment: {e}")
+        return {"status": "error", "error": "Execution error", "message": str(e)}
+
+@mcp.tool()
+async def get_campfires(project_id: str) -> Dict[str, Any]:
+    """Get campfire (chat) rooms for a project.
+
+    Use the returned campfire IDs with get_campfire_lines() to read chat messages.
+
+    Args:
+        project_id: The project ID
+    """
+    client = _get_basecamp_client()
+    if not client:
+        return _get_auth_error_response()
+
+    try:
+        campfires = await _run_sync(client.get_campfires, project_id)
+        return {"status": "success", "campfires": campfires}
+    except Exception as e:
+        logger.error(f"Error getting campfires: {e}")
+        return {"status": "error", "error": "Execution error", "message": str(e)}
 
 @mcp.tool()
 async def get_campfire_lines(
@@ -1500,11 +1598,11 @@ async def get_daily_check_ins(project_id: str, page: Optional[int] = None) -> Di
     try:
         if page is not None and not isinstance(page, int):
             page = 1
-        answers = await _run_sync(client.get_daily_check_ins, project_id, page=page or 1)
+        questions = await _run_sync(client.get_daily_check_ins, project_id, page=page or 1)
         return {
             "status": "success",
-            "campfire_lines": answers,
-            "count": len(answers)
+            "check_ins": questions,
+            "count": len(questions)
         }
     except Exception as e:
         logger.error(f"Error getting daily check ins: {e}")
@@ -1537,7 +1635,7 @@ async def get_question_answers(project_id: str, question_id: str, page: Optional
         answers = await _run_sync(client.get_question_answers, project_id, question_id, page=page or 1)
         return {
             "status": "success",
-            "campfire_lines": answers,
+            "answers": answers,
             "count": len(answers)
         }
     except Exception as e:
@@ -2174,7 +2272,28 @@ async def delete_webhook(project_id: str, webhook_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-# Document Management
+# Vault & Document Management
+@mcp.tool()
+async def get_vaults(project_id: str) -> Dict[str, Any]:
+    """Get the root vault (Docs & Files) for a project.
+
+    Returns the vault object with its ID and any nested child vaults.
+    Use the returned vault ID with get_documents() and get_uploads().
+
+    Args:
+        project_id: The project ID
+    """
+    client = _get_basecamp_client()
+    if not client:
+        return _get_auth_error_response()
+
+    try:
+        vault = await _run_sync(client.get_vaults, project_id)
+        return {"status": "success", "vault": vault}
+    except Exception as e:
+        logger.error(f"Error getting vaults: {e}")
+        return {"status": "error", "error": "Execution error", "message": str(e)}
+
 @mcp.tool()
 async def get_documents(
     project_id: str,
