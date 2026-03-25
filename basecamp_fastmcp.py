@@ -315,6 +315,7 @@ async def get_todolists(
 async def get_todos(
     project_id: str,
     todolist_id: str,
+    completed: Optional[bool] = None,
     page: Optional[int] = 1,
     max_results: Optional[int] = 64,
     raw_response: Optional[bool] = False
@@ -326,6 +327,8 @@ async def get_todos(
     Args:
         project_id: Project ID
         todolist_id: The todo list ID
+        completed: Filter by completion status. True = only completed, False = only incomplete,
+                   None (default) = incomplete only (Basecamp API default).
         page: Page number (default: 1, 1-based)
         max_results: Maximum results per page (default: 64, hard limit: 64)
         raw_response: If True, return complete API response without summarization (default: False)
@@ -348,7 +351,7 @@ async def get_todos(
             logger.warning(warning)
 
         # Get all todos (client handles pagination internally)
-        all_todos = await _run_sync(client.get_todos, project_id, todolist_id)
+        all_todos = await _run_sync(lambda: client.get_todos(project_id, todolist_id, completed=completed))
 
         # Calculate pagination
         start_idx = (page - 1) * max_results
@@ -393,7 +396,91 @@ async def get_todos(
         }
 
 @mcp.tool()
-async def create_todo(project_id: str, todolist_id: str, content: str, 
+async def get_todo(todo_id: str, raw_response: Optional[bool] = False) -> Dict[str, Any]:
+    """Get a specific todo by its ID.
+
+    Fetches a single todo item directly by ID, regardless of completion status.
+    Useful when you know the todo ID and want to inspect its details or comments.
+
+    Args:
+        todo_id: The todo ID
+        raw_response: If True, return complete API response without summarization (default: False)
+    """
+    from response_helpers import summarize_todo
+
+    client = _get_basecamp_client()
+    if not client:
+        return _get_auth_error_response()
+
+    try:
+        todo = await _run_sync(client.get_todo, todo_id)
+
+        if not raw_response:
+            todo = summarize_todo(todo)
+
+        return {
+            "status": "success",
+            "todo": todo
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting todo: {e}")
+        if "401" in str(e) and "expired" in str(e).lower():
+            return {
+                "status": "error",
+                "error": "OAuth token expired",
+                "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
+            }
+        return {
+            "status": "error",
+            "error": "Execution error",
+            "message": str(e)
+        }
+
+@mcp.tool()
+async def get_todolist(todolist_id: str, raw_response: Optional[bool] = False) -> Dict[str, Any]:
+    """Get a specific todolist by its ID.
+
+    Fetches a single todolist directly by ID. Useful when you know the todolist ID
+    and want to inspect its details without fetching all todolists for a project.
+
+    Args:
+        todolist_id: The todolist ID
+        raw_response: If True, return complete API response without summarization (default: False)
+    """
+    from response_helpers import summarize_todolist
+
+    client = _get_basecamp_client()
+    if not client:
+        return _get_auth_error_response()
+
+    try:
+        todolist = await _run_sync(client.get_todolist, todolist_id)
+
+        if not raw_response:
+            todolist = summarize_todolist(todolist)
+
+        return {
+            "status": "success",
+            "todolist": todolist
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting todolist: {e}")
+        if "401" in str(e) and "expired" in str(e).lower():
+            return {
+                "status": "error",
+                "error": "OAuth token expired",
+                "message": "Your Basecamp OAuth token expired during the API call. Please re-authenticate by visiting http://localhost:8000 and completing the OAuth flow again."
+            }
+        return {
+            "status": "error",
+            "error": "Execution error",
+            "message": str(e)
+        }
+
+@mcp.tool()
+async def create_todo(project_id: str, todolist_id: str, content: str,
                      description: Optional[str] = None, 
                      assignee_ids: Optional[List[str]] = None,
                      completion_subscriber_ids: Optional[List[str]] = None, 

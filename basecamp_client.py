@@ -143,13 +143,20 @@ class BasecampClient:
             raise Exception(f"Failed to get todolist: {response.status_code} - {response.text}")
 
     # To-do methods
-    def get_todos(self, project_id, todolist_id):
+    def get_todos(self, project_id, todolist_id, completed=None):
         """Get all todos in a todolist, handling pagination.
 
         Basecamp paginates list endpoints (commonly 15 items per page). This
         implementation follows pagination via the `page` query parameter and
         the HTTP `Link` header if present, aggregating all pages before
         returning the combined list.
+
+        Args:
+            project_id: Project ID
+            todolist_id: Todolist ID
+            completed: If True, return only completed todos. If False, return only
+                       incomplete todos. If None (default), return incomplete todos
+                       (Basecamp API default behavior).
         """
         endpoint = f'buckets/{project_id}/todolists/{todolist_id}/todos.json'
 
@@ -157,7 +164,10 @@ class BasecampClient:
         page = 1
 
         while True:
-            response = self.get(endpoint, params={"page": page})
+            params = {"page": page}
+            if completed is not None:
+                params["completed"] = str(completed).lower()
+            response = self.get(endpoint, params=params)
             if response.status_code != 200:
                 raise Exception(f"Failed to get todos: {response.status_code} - {response.text}")
 
