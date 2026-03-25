@@ -168,7 +168,6 @@ The integration uses Basecamp's native search API for comprehensive search capab
 - `search_utils.py`: `native_search(query, page=1, max_pages=None)` - handles pagination automatically
 - `basecamp_fastmcp.py`:
   - `search_basecamp(query, max_pages=3)` - MCP tool for search
-  - `global_search(query, max_pages=5)` - Alias for backward compatibility
 
 ### Pagination
 - Each page returns up to 50 results

@@ -651,10 +651,13 @@ class BasecampClient:
     def get_card_table_details(self, project_id, card_table_id):
         """Get details for a specific card table."""
         response = self.get(f'buckets/{project_id}/card_tables/{card_table_id}.json')
-        return self._check_response(
+        result = self._check_response(
             response, context=f"Get card table {card_table_id}",
             expected_statuses=(200, 204)
         )
+        if result is True:  # 204 No Content — empty card table
+            return {"lists": [], "id": card_table_id, "status": "empty"}
+        return result
 
     # ------------------------------------------------------------------
     # Card Table Column methods

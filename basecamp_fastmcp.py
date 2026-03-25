@@ -1608,7 +1608,7 @@ async def get_daily_check_ins(project_id: str, page: Optional[int] = None) -> Di
     try:
         if page is not None and not isinstance(page, int):
             page = 1
-        questions = await _run_sync(client.get_daily_check_ins, project_id, page=page or 1)
+        questions = await _run_sync(lambda: client.get_daily_check_ins(project_id, page=page or 1))
         return {
             "status": "success",
             "check_ins": questions,
@@ -1642,7 +1642,7 @@ async def get_question_answers(project_id: str, question_id: str, page: Optional
     try:
         if page is not None and not isinstance(page, int):
             page = 1
-        answers = await _run_sync(client.get_question_answers, project_id, question_id, page=page or 1)
+        answers = await _run_sync(lambda: client.get_question_answers(project_id, question_id, page=page or 1))
         return {
             "status": "success",
             "answers": answers,
