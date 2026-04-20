@@ -89,21 +89,15 @@ async def _run_sync(func, *args, **kwargs):
 
 # Core MCP Tools - Starting with essential ones from original server
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_projects(
-    page: Optional[int] = 1,
-    max_results: Optional[int] = 16,
-    raw_response: Optional[bool] = False
+    page: int = 1,
+    max_results: int = 16,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """Get all Basecamp projects.
 
-    Results are paginated and summarized by default for optimal token usage.
-
-    Args:
-        page: Page number (default: 1, 1-based)
-        max_results: Maximum results per page (default: 16, hard limit: 16)
-        raw_response: If True, return complete API response without summarization (default: False)
-    """
+    Results are paginated and summarized by default for optimal token usage."""
     from response_helpers import HARD_LIMITS, create_pagination_info, summarize_project
 
     client = _get_basecamp_client()
@@ -159,13 +153,9 @@ async def get_projects(
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_project(project_id: str) -> Dict[str, Any]:
-    """Get details for a specific project.
-    
-    Args:
-        project_id: The project ID
-    """
+    """Get details for a specific project."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -188,22 +178,16 @@ async def get_project(project_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_people(
-    page: Optional[int] = 1,
-    max_results: Optional[int] = 64,
-    raw_response: Optional[bool] = False
+    page: int = 1,
+    max_results: int = 64,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """Get all people in the Basecamp account.
 
     Returns names, IDs, and email addresses. Use the returned person IDs
-    when assigning todos (assignee_ids) or cards.
-
-    Args:
-        page: Page number (default: 1, 1-based)
-        max_results: Maximum results per page (default: 64, hard limit: 64)
-        raw_response: If True, return complete API response without summarization (default: False)
-    """
+    when assigning todos (assignee_ids) or cards."""
     from response_helpers import HARD_LIMITS, create_pagination_info
 
     client = _get_basecamp_client()
@@ -253,8 +237,8 @@ async def get_people(
         logger.error(f"Error getting people: {e}")
         return {"status": "error", "error": "Execution error", "message": str(e)}
 
-@mcp.tool()
-async def search_basecamp(query: str, page: Optional[int] = 1, max_results: Optional[int] = 16) -> Dict[str, Any]:
+@mcp.tool(structured_output=False)
+async def search_basecamp(query: str, page: int = 1, max_results: int = 16) -> Dict[str, Any]:
     """Search across all Basecamp content using native search API.
 
     Searches across:
@@ -270,13 +254,7 @@ async def search_basecamp(query: str, page: Optional[int] = 1, max_results: Opti
     Returns summarized results with id, type, title, preview (truncated), and URLs.
     Use get_comments, get_card, get_document, etc. with the returned IDs to fetch full details.
 
-    Results are paginated with a hard limit of 16 results per page.
-
-    Args:
-        query: Search query string
-        page: Page number to fetch (default: 1, 1-based)
-        max_results: Maximum number of results to return (default: 16, hard limit: 16)
-    """
+    Results are paginated with a hard limit of 16 results per page."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -304,23 +282,16 @@ async def search_basecamp(query: str, page: Optional[int] = 1, max_results: Opti
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_todolists(
     project_id: str,
-    page: Optional[int] = 1,
-    max_results: Optional[int] = 64,
-    raw_response: Optional[bool] = False
+    page: int = 1,
+    max_results: int = 64,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """Get todo lists for a project.
 
-    Results are paginated and summarized by default for optimal token usage.
-
-    Args:
-        project_id: The project ID
-        page: Page number (default: 1, 1-based)
-        max_results: Maximum results per page (default: 64, hard limit: 64)
-        raw_response: If True, return complete API response without summarization (default: False)
-    """
+    Results are paginated and summarized by default for optimal token usage."""
     from response_helpers import HARD_LIMITS, create_pagination_info, summarize_todolist
 
     client = _get_basecamp_client()
@@ -376,14 +347,14 @@ async def get_todolists(
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_todos(
     project_id: str,
     todolist_id: str,
     completed: Optional[bool] = None,
-    page: Optional[int] = 1,
-    max_results: Optional[int] = 64,
-    raw_response: Optional[bool] = False
+    page: int = 1,
+    max_results: int = 64,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """Get todos from a todo list.
 
@@ -392,18 +363,7 @@ async def get_todos(
 
     Results are paginated and summarized by default. Summarized fields: id, content,
     status, assignee names, due_on, creator, dates, URLs. Use raw_response=True if
-    you need assignee IDs, email addresses, or full descriptions.
-
-    Args:
-        project_id: Project ID
-        todolist_id: The todo list ID (from get_todolists results)
-        completed: Filter by completion status. True = only completed, False = only incomplete,
-                   None (default) = incomplete only (Basecamp API default).
-        page: Page number (default: 1, 1-based)
-        max_results: Maximum results per page (default: 64, hard limit: 64)
-        raw_response: If True, return complete API response without summarization (default: False)
-                     WARNING: Only use when you need complete object details
-    """
+    you need assignee IDs, email addresses, or full descriptions."""
     from response_helpers import HARD_LIMITS, create_pagination_info, summarize_todo
 
     client = _get_basecamp_client()
@@ -465,17 +425,12 @@ async def get_todos(
             "message": str(e)
         }
 
-@mcp.tool()
-async def get_todo(todo_id: str, raw_response: Optional[bool] = False) -> Dict[str, Any]:
+@mcp.tool(structured_output=False)
+async def get_todo(todo_id: str, raw_response: bool = False) -> Dict[str, Any]:
     """Get a specific todo by its ID.
 
     Fetches a single todo item directly by ID, regardless of completion status.
-    Useful when you know the todo ID and want to inspect its details or comments.
-
-    Args:
-        todo_id: The todo ID
-        raw_response: If True, return complete API response without summarization (default: False)
-    """
+    Useful when you know the todo ID and want to inspect its details or comments."""
     from response_helpers import summarize_todo
 
     client = _get_basecamp_client()
@@ -507,17 +462,12 @@ async def get_todo(todo_id: str, raw_response: Optional[bool] = False) -> Dict[s
             "message": str(e)
         }
 
-@mcp.tool()
-async def get_todolist(todolist_id: str, raw_response: Optional[bool] = False) -> Dict[str, Any]:
+@mcp.tool(structured_output=False)
+async def get_todolist(todolist_id: str, raw_response: bool = False) -> Dict[str, Any]:
     """Get a specific todolist by its ID.
 
     Fetches a single todolist directly by ID. Useful when you know the todolist ID
-    and want to inspect its details without fetching all todolists for a project.
-
-    Args:
-        todolist_id: The todolist ID
-        raw_response: If True, return complete API response without summarization (default: False)
-    """
+    and want to inspect its details without fetching all todolists for a project."""
     from response_helpers import summarize_todolist
 
     client = _get_basecamp_client()
@@ -549,7 +499,7 @@ async def get_todolist(todolist_id: str, raw_response: Optional[bool] = False) -
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def create_todo(project_id: str, todolist_id: str, content: str,
                      description: Optional[str] = None, 
                      assignee_ids: Optional[List[str]] = None,
@@ -557,19 +507,7 @@ async def create_todo(project_id: str, todolist_id: str, content: str,
                      notify: bool = False, 
                      due_on: Optional[str] = None, 
                      starts_on: Optional[str] = None) -> Dict[str, Any]:
-    """Create a new todo item in a todo list.
-    
-    Args:
-        project_id: Project ID
-        todolist_id: The todo list ID
-        content: The todo item's text (required)
-        description: HTML description of the todo
-        assignee_ids: List of person IDs to assign
-        completion_subscriber_ids: List of person IDs to notify on completion
-        notify: Whether to notify assignees
-        due_on: Due date in YYYY-MM-DD format
-        starts_on: Start date in YYYY-MM-DD format
-    """
+    """Create a new todo item in a todo list."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -604,7 +542,7 @@ async def create_todo(project_id: str, todolist_id: str, content: str,
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def update_todo(project_id: str, todo_id: str, 
                      content: Optional[str] = None,
                      description: Optional[str] = None, 
@@ -613,18 +551,7 @@ async def update_todo(project_id: str, todo_id: str,
                      notify: Optional[bool] = None,
                      due_on: Optional[str] = None, 
                      starts_on: Optional[str] = None) -> Dict[str, Any]:
-    """Update an existing todo item.
-    
-    Args:
-        project_id: Project ID
-        todo_id: The todo ID
-        content: The todo item's text
-        description: HTML description of the todo
-        assignee_ids: List of person IDs to assign
-        completion_subscriber_ids: List of person IDs to notify on completion
-        due_on: Due date in YYYY-MM-DD format
-        starts_on: Start date in YYYY-MM-DD format
-    """
+    """Update an existing todo item."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -668,14 +595,9 @@ async def update_todo(project_id: str, todo_id: str,
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def delete_todo(project_id: str, todo_id: str) -> Dict[str, Any]:
-    """Delete a todo item.
-    
-    Args:
-        project_id: Project ID
-        todo_id: The todo ID
-    """
+    """Delete a todo item."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -698,14 +620,9 @@ async def delete_todo(project_id: str, todo_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def complete_todo(project_id: str, todo_id: str) -> Dict[str, Any]:
-    """Mark a todo item as complete.
-    
-    Args:
-        project_id: Project ID
-        todo_id: The todo ID
-    """
+    """Mark a todo item as complete."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -729,14 +646,9 @@ async def complete_todo(project_id: str, todo_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def uncomplete_todo(project_id: str, todo_id: str) -> Dict[str, Any]:
-    """Mark a todo item as incomplete.
-    
-    Args:
-        project_id: Project ID
-        todo_id: The todo ID
-    """
+    """Mark a todo item as incomplete."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -759,27 +671,19 @@ async def uncomplete_todo(project_id: str, todo_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_comments(
     recording_id: str,
     project_id: str,
-    page: Optional[int] = 1,
-    max_results: Optional[int] = 16,
-    raw_response: Optional[bool] = False
+    page: int = 1,
+    max_results: int = 16,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """Get comments for a Basecamp item (todo, message, card, document, etc.).
 
     In Basecamp, any item that can have comments is called a "recording".
     The recording_id is the ID of the todo, message, card, or document you
-    want to read comments for.
-
-    Args:
-        recording_id: The ID of the item (todo, message, card, document, etc.)
-        project_id: The project ID containing the item
-        page: Page number (default: 1, 1-based)
-        max_results: Maximum results per page (default: 16, hard limit: 16)
-        raw_response: If True, return complete API response without summarization (default: False)
-    """
+    want to read comments for."""
     from response_helpers import HARD_LIMITS, create_pagination_info, summarize_comment
 
     client = _get_basecamp_client()
@@ -835,15 +739,9 @@ async def get_comments(
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def create_comment(recording_id: str, project_id: str, content: str) -> Dict[str, Any]:
-    """Create a comment on a Basecamp item.
-
-    Args:
-        recording_id: The item ID
-        project_id: The project ID
-        content: The comment content in HTML format
-    """
+    """Create a comment on a Basecamp item."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -867,14 +765,9 @@ async def create_comment(recording_id: str, project_id: str, content: str) -> Di
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_comment(comment_id: str, project_id: str) -> Dict[str, Any]:
-    """Get a specific comment by ID.
-
-    Args:
-        comment_id: The comment ID
-        project_id: The project/bucket ID containing the comment
-    """
+    """Get a specific comment by ID."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -886,15 +779,9 @@ async def get_comment(comment_id: str, project_id: str) -> Dict[str, Any]:
         logger.error(f"Error getting comment: {e}")
         return {"status": "error", "error": "Execution error", "message": str(e)}
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def update_comment(comment_id: str, project_id: str, content: str) -> Dict[str, Any]:
-    """Update an existing comment.
-
-    Args:
-        comment_id: The comment ID to update
-        project_id: The project/bucket ID containing the comment
-        content: New HTML content for the comment
-    """
+    """Update an existing comment."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -906,14 +793,9 @@ async def update_comment(comment_id: str, project_id: str, content: str) -> Dict
         logger.error(f"Error updating comment: {e}")
         return {"status": "error", "error": "Execution error", "message": str(e)}
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def delete_comment(comment_id: str, project_id: str) -> Dict[str, Any]:
-    """Delete a comment.
-
-    Args:
-        comment_id: The comment ID to delete
-        project_id: The project/bucket ID containing the comment
-    """
+    """Delete a comment."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -925,15 +807,11 @@ async def delete_comment(comment_id: str, project_id: str) -> Dict[str, Any]:
         logger.error(f"Error deleting comment: {e}")
         return {"status": "error", "error": "Execution error", "message": str(e)}
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_campfires(project_id: str) -> Dict[str, Any]:
     """Get campfire (chat) rooms for a project.
 
-    Use the returned campfire IDs with get_campfire_lines() to read chat messages.
-
-    Args:
-        project_id: The project ID
-    """
+    Use the returned campfire IDs with get_campfire_lines() to read chat messages."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -945,26 +823,18 @@ async def get_campfires(project_id: str) -> Dict[str, Any]:
         logger.error(f"Error getting campfires: {e}")
         return {"status": "error", "error": "Execution error", "message": str(e)}
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_campfire_lines(
     project_id: str,
     campfire_id: str,
-    page: Optional[int] = 1,
-    max_results: Optional[int] = 16,
-    raw_response: Optional[bool] = False
+    page: int = 1,
+    max_results: int = 16,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """Get recent messages from a Basecamp campfire (chat room).
 
     Workflow: First call get_campfires(project_id) to discover campfire IDs,
-    then call this tool with the returned campfire_id.
-
-    Args:
-        project_id: The project ID
-        campfire_id: The campfire/chat room ID
-        page: Page number (default: 1, 1-based)
-        max_results: Maximum results per page (default: 16, hard limit: 16)
-        raw_response: If True, return complete API response without summarization (default: False)
-    """
+    then call this tool with the returned campfire_id."""
     from response_helpers import HARD_LIMITS, create_pagination_info, summarize_campfire_line
 
     client = _get_basecamp_client()
@@ -1020,23 +890,16 @@ async def get_campfire_lines(
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_messages(
     project_id: str,
-    page: Optional[int] = 1,
-    max_results: Optional[int] = 16,
-    raw_response: Optional[bool] = False
+    page: int = 1,
+    max_results: int = 16,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """Get messages from a project's message board.
 
-    Results are paginated and summarized by default for optimal token usage.
-
-    Args:
-        project_id: The project ID
-        page: Page number (default: 1, 1-based)
-        max_results: Maximum results per page (default: 16, hard limit: 16)
-        raw_response: If True, return complete API response without summarization (default: False)
-    """
+    Results are paginated and summarized by default for optimal token usage."""
     from response_helpers import HARD_LIMITS, create_pagination_info, summarize_message
 
     client = _get_basecamp_client()
@@ -1092,25 +955,17 @@ async def get_messages(
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_message(
     project_id: str,
     message_id: str,
-    content_offset: Optional[int] = 0,
-    content_length: Optional[int] = 2000,
-    raw_response: Optional[bool] = False
+    content_offset: int = 0,
+    content_length: int = 2000,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """Get a single message with optional content chunking.
 
-    For large messages, use content_offset and content_length to retrieve content in chunks.
-
-    Args:
-        project_id: Project ID
-        message_id: Message ID
-        content_offset: Character offset to start from (default: 0)
-        content_length: Maximum length of content chunk in characters (default: 2000)
-        raw_response: If True, return complete API response (default: False)
-    """
+    For large messages, use content_offset and content_length to retrieve content in chunks."""
     from response_helpers import chunk_content_by_words
 
     client = _get_basecamp_client()
@@ -1168,13 +1023,9 @@ async def get_message(
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_card_tables(project_id: str) -> Dict[str, Any]:
-    """Get all card tables for a project.
-
-    Args:
-        project_id: The project ID
-    """
+    """Get all card tables for a project."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1198,13 +1049,9 @@ async def get_card_tables(project_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_card_table(project_id: str) -> Dict[str, Any]:
-    """Get the card table details for a project.
-    
-    Args:
-        project_id: The project ID
-    """
+    """Get the card table details for a project."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1230,14 +1077,9 @@ async def get_card_table(project_id: str) -> Dict[str, Any]:
             "debug": error_msg
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_columns(project_id: str, card_table_id: str) -> Dict[str, Any]:
-    """Get all columns in a card table.
-    
-    Args:
-        project_id: The project ID
-        card_table_id: The card table ID
-    """
+    """Get all columns in a card table."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1261,27 +1103,19 @@ async def get_columns(project_id: str, card_table_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_cards(
     project_id: str,
     column_id: str,
-    page: Optional[int] = 1,
-    max_results: Optional[int] = 16,
-    raw_response: Optional[bool] = False
+    page: int = 1,
+    max_results: int = 16,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """Get all cards in a kanban column.
 
     Workflow: First call get_card_table(project_id) to get the card table,
     then get_columns(project_id, card_table_id) to discover column IDs,
-    then call this tool with the returned column_id.
-
-    Args:
-        project_id: The project ID
-        column_id: The column ID
-        page: Page number (default: 1, 1-based)
-        max_results: Maximum results per page (default: 16, hard limit: 16)
-        raw_response: If True, return complete API response without summarization (default: False)
-    """
+    then call this tool with the returned column_id."""
     from response_helpers import HARD_LIMITS, create_pagination_info, summarize_card
 
     client = _get_basecamp_client()
@@ -1332,18 +1166,9 @@ async def get_cards(
             }
         return {"status": "error", "error": str(e)}
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def create_card(project_id: str, column_id: str, title: str, content: Optional[str] = None, due_on: Optional[str] = None, notify: bool = False) -> Dict[str, Any]:
-    """Create a new card in a column.
-    
-    Args:
-        project_id: The project ID
-        column_id: The column ID
-        title: The card title
-        content: Optional card content/description
-        due_on: Optional due date (ISO 8601 format)
-        notify: Whether to notify assignees (default: false)
-    """
+    """Create a new card in a column."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1367,14 +1192,9 @@ async def create_card(project_id: str, column_id: str, title: str, content: Opti
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_column(project_id: str, column_id: str) -> Dict[str, Any]:
-    """Get details for a specific column.
-    
-    Args:
-        project_id: The project ID
-        column_id: The column ID
-    """
+    """Get details for a specific column."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1397,15 +1217,9 @@ async def get_column(project_id: str, column_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def create_column(project_id: str, card_table_id: str, title: str) -> Dict[str, Any]:
-    """Create a new column in a card table.
-    
-    Args:
-        project_id: The project ID
-        card_table_id: The card table ID
-        title: The column title
-    """
+    """Create a new column in a card table."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1429,15 +1243,9 @@ async def create_column(project_id: str, card_table_id: str, title: str) -> Dict
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def move_card(project_id: str, card_id: str, column_id: str) -> Dict[str, Any]:
-    """Move a card to a new column.
-    
-    Args:
-        project_id: The project ID
-        card_id: The card ID
-        column_id: The destination column ID
-    """
+    """Move a card to a new column."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1460,14 +1268,9 @@ async def move_card(project_id: str, card_id: str, column_id: str) -> Dict[str, 
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def complete_card(project_id: str, card_id: str) -> Dict[str, Any]:
-    """Mark a card as complete.
-    
-    Args:
-        project_id: The project ID
-        card_id: The card ID
-    """
+    """Mark a card as complete."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1490,25 +1293,17 @@ async def complete_card(project_id: str, card_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_card(
     project_id: str,
     card_id: str,
-    content_offset: Optional[int] = 0,
-    content_length: Optional[int] = 2000,
-    raw_response: Optional[bool] = False
+    content_offset: int = 0,
+    content_length: int = 2000,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """Get details for a specific card with optional content chunking.
 
-    For cards with large content, use content_offset and content_length to retrieve content in chunks.
-
-    Args:
-        project_id: The project ID
-        card_id: The card ID
-        content_offset: Character offset to start from (default: 0)
-        content_length: Maximum length of content chunk in characters (default: 2000)
-        raw_response: If True, return complete API response (default: False)
-    """
+    For cards with large content, use content_offset and content_length to retrieve content in chunks."""
     from response_helpers import chunk_content_by_words, extract_names_from_people_list
 
     client = _get_basecamp_client()
@@ -1558,18 +1353,9 @@ async def get_card(
         logger.error(f"Error getting card: {e}")
         return {"status": "error", "error": str(e)}
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def update_card(project_id: str, card_id: str, title: Optional[str] = None, content: Optional[str] = None, due_on: Optional[str] = None, assignee_ids: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Update a card.
-    
-    Args:
-        project_id: The project ID
-        card_id: The card ID
-        title: The new card title
-        content: The new card content/description
-        due_on: Due date (ISO 8601 format)
-        assignee_ids: Array of person IDs to assign to the card
-    """
+    """Update a card."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1593,14 +1379,9 @@ async def update_card(project_id: str, card_id: str, title: Optional[str] = None
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_daily_check_ins(project_id: str, page: Optional[int] = None) -> Dict[str, Any]:
-    """Get project's daily checking questionnaire.
-    
-    Args:
-        project_id: The project ID
-        page: Page number paginated response
-    """
+    """Get project's daily checking questionnaire."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1626,15 +1407,9 @@ async def get_daily_check_ins(project_id: str, page: Optional[int] = None) -> Di
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_question_answers(project_id: str, question_id: str, page: Optional[int] = None) -> Dict[str, Any]:
-    """Get answers on daily check-in question.
-    
-    Args:
-        project_id: The project ID
-        question_id: The question ID
-        page: Page number paginated response
-    """
+    """Get answers on daily check-in question."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1661,15 +1436,9 @@ async def get_question_answers(project_id: str, question_id: str, page: Optional
         }
 
 # Column Management Tools
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def update_column(project_id: str, column_id: str, title: str) -> Dict[str, Any]:
-    """Update a column title.
-    
-    Args:
-        project_id: The project ID
-        column_id: The column ID
-        title: The new column title
-    """
+    """Update a column title."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1693,16 +1462,9 @@ async def update_column(project_id: str, column_id: str, title: str) -> Dict[str
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def move_column(project_id: str, card_table_id: str, column_id: str, position: int) -> Dict[str, Any]:
-    """Move a column to a new position.
-    
-    Args:
-        project_id: The project ID
-        card_table_id: The card table ID
-        column_id: The column ID
-        position: The new 1-based position
-    """
+    """Move a column to a new position."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1725,15 +1487,9 @@ async def move_column(project_id: str, card_table_id: str, column_id: str, posit
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def update_column_color(project_id: str, column_id: str, color: str) -> Dict[str, Any]:
-    """Update a column color.
-    
-    Args:
-        project_id: The project ID
-        column_id: The column ID
-        color: The hex color code (e.g., #FF0000)
-    """
+    """Update a column color."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1757,14 +1513,9 @@ async def update_column_color(project_id: str, column_id: str, color: str) -> Di
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def put_column_on_hold(project_id: str, column_id: str) -> Dict[str, Any]:
-    """Put a column on hold (freeze work).
-    
-    Args:
-        project_id: The project ID
-        column_id: The column ID
-    """
+    """Put a column on hold (freeze work)."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1787,14 +1538,9 @@ async def put_column_on_hold(project_id: str, column_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def remove_column_hold(project_id: str, column_id: str) -> Dict[str, Any]:
-    """Remove hold from a column (unfreeze work).
-    
-    Args:
-        project_id: The project ID
-        column_id: The column ID
-    """
+    """Remove hold from a column (unfreeze work)."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1817,14 +1563,9 @@ async def remove_column_hold(project_id: str, column_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def watch_column(project_id: str, column_id: str) -> Dict[str, Any]:
-    """Subscribe to notifications for changes in a column.
-    
-    Args:
-        project_id: The project ID
-        column_id: The column ID
-    """
+    """Subscribe to notifications for changes in a column."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1847,14 +1588,9 @@ async def watch_column(project_id: str, column_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def unwatch_column(project_id: str, column_id: str) -> Dict[str, Any]:
-    """Unsubscribe from notifications for a column.
-    
-    Args:
-        project_id: The project ID
-        column_id: The column ID
-    """
+    """Unsubscribe from notifications for a column."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1878,14 +1614,9 @@ async def unwatch_column(project_id: str, column_id: str) -> Dict[str, Any]:
         }
 
 # More Card Management Tools  
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def uncomplete_card(project_id: str, card_id: str) -> Dict[str, Any]:
-    """Mark a card as incomplete.
-    
-    Args:
-        project_id: The project ID
-        card_id: The card ID
-    """
+    """Mark a card as incomplete."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1909,14 +1640,9 @@ async def uncomplete_card(project_id: str, card_id: str) -> Dict[str, Any]:
         }
 
 # Card Steps (Sub-tasks) Management
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_card_steps(project_id: str, card_id: str) -> Dict[str, Any]:
-    """Get all steps (sub-tasks) for a card.
-    
-    Args:
-        project_id: The project ID
-        card_id: The card ID
-    """
+    """Get all steps (sub-tasks) for a card."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1940,17 +1666,9 @@ async def get_card_steps(project_id: str, card_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def create_card_step(project_id: str, card_id: str, title: str, due_on: Optional[str] = None, assignee_ids: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Create a new step (sub-task) for a card.
-    
-    Args:
-        project_id: The project ID
-        card_id: The card ID
-        title: The step title
-        due_on: Optional due date (ISO 8601 format)
-        assignee_ids: Array of person IDs to assign to the step
-    """
+    """Create a new step (sub-task) for a card."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -1974,14 +1692,9 @@ async def create_card_step(project_id: str, card_id: str, title: str, due_on: Op
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_card_step(project_id: str, step_id: str) -> Dict[str, Any]:
-    """Get details for a specific card step.
-    
-    Args:
-        project_id: The project ID
-        step_id: The step ID
-    """
+    """Get details for a specific card step."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2004,17 +1717,9 @@ async def get_card_step(project_id: str, step_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def update_card_step(project_id: str, step_id: str, title: Optional[str] = None, due_on: Optional[str] = None, assignee_ids: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Update a card step.
-    
-    Args:
-        project_id: The project ID
-        step_id: The step ID
-        title: The step title
-        due_on: Due date (ISO 8601 format)
-        assignee_ids: Array of person IDs to assign to the step
-    """
+    """Update a card step."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2038,14 +1743,9 @@ async def update_card_step(project_id: str, step_id: str, title: Optional[str] =
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def delete_card_step(project_id: str, step_id: str) -> Dict[str, Any]:
-    """Delete a card step.
-    
-    Args:
-        project_id: The project ID
-        step_id: The step ID
-    """
+    """Delete a card step."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2068,14 +1768,9 @@ async def delete_card_step(project_id: str, step_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def complete_card_step(project_id: str, step_id: str) -> Dict[str, Any]:
-    """Mark a card step as complete.
-    
-    Args:
-        project_id: The project ID
-        step_id: The step ID
-    """
+    """Mark a card step as complete."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2098,14 +1793,9 @@ async def complete_card_step(project_id: str, step_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def uncomplete_card_step(project_id: str, step_id: str) -> Dict[str, Any]:
-    """Mark a card step as incomplete.
-    
-    Args:
-        project_id: The project ID
-        step_id: The step ID
-    """
+    """Mark a card step as incomplete."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2129,15 +1819,9 @@ async def uncomplete_card_step(project_id: str, step_id: str) -> Dict[str, Any]:
         }
 
 # Attachments, Events, and Webhooks
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def create_attachment(file_path: str, name: str, content_type: Optional[str] = None) -> Dict[str, Any]:
-    """Upload a file as an attachment.
-    
-    Args:
-        file_path: Local path to file
-        name: Filename for Basecamp
-        content_type: MIME type
-    """
+    """Upload a file as an attachment."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2160,14 +1844,9 @@ async def create_attachment(file_path: str, name: str, content_type: Optional[st
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_events(project_id: str, recording_id: str) -> Dict[str, Any]:
-    """Get events for a recording.
-    
-    Args:
-        project_id: Project ID
-        recording_id: Recording ID
-    """
+    """Get events for a recording."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2191,13 +1870,9 @@ async def get_events(project_id: str, recording_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_webhooks(project_id: str) -> Dict[str, Any]:
-    """List webhooks for a project.
-    
-    Args:
-        project_id: Project ID
-    """
+    """List webhooks for a project."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2221,15 +1896,9 @@ async def get_webhooks(project_id: str) -> Dict[str, Any]:
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def create_webhook(project_id: str, payload_url: str, types: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Create a webhook.
-    
-    Args:
-        project_id: Project ID
-        payload_url: Payload URL
-        types: Event types
-    """
+    """Create a webhook."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2252,14 +1921,9 @@ async def create_webhook(project_id: str, payload_url: str, types: Optional[List
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def delete_webhook(project_id: str, webhook_id: str) -> Dict[str, Any]:
-    """Delete a webhook.
-    
-    Args:
-        project_id: Project ID
-        webhook_id: Webhook ID
-    """
+    """Delete a webhook."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2283,16 +1947,12 @@ async def delete_webhook(project_id: str, webhook_id: str) -> Dict[str, Any]:
         }
 
 # Vault & Document Management
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_vaults(project_id: str) -> Dict[str, Any]:
     """Get the root vault (Docs & Files) for a project.
 
     Returns the vault object with its ID and any nested child vaults.
-    Use the returned vault ID with get_documents() and get_uploads().
-
-    Args:
-        project_id: The project ID
-    """
+    Use the returned vault ID with get_documents() and get_uploads()."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2304,26 +1964,18 @@ async def get_vaults(project_id: str) -> Dict[str, Any]:
         logger.error(f"Error getting vaults: {e}")
         return {"status": "error", "error": "Execution error", "message": str(e)}
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_documents(
     project_id: str,
     vault_id: str,
-    page: Optional[int] = 1,
-    max_results: Optional[int] = 16,
-    raw_response: Optional[bool] = False
+    page: int = 1,
+    max_results: int = 16,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """List documents in a vault.
 
     Workflow: First call get_vaults(project_id) to discover the root vault ID,
-    then call this tool with the returned vault_id.
-
-    Args:
-        project_id: Project ID
-        vault_id: Vault ID (from get_vaults results)
-        page: Page number (default: 1)
-        max_results: Maximum results per page (default: 16, hard limit: 16)
-        raw_response: If True, return complete API response (default: False)
-    """
+    then call this tool with the returned vault_id."""
     from response_helpers import HARD_LIMITS, create_pagination_info, summarize_document
 
     client = _get_basecamp_client()
@@ -2368,25 +2020,17 @@ async def get_documents(
         logger.error(f"Error getting documents: {e}")
         return {"status": "error", "error": str(e)}
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_document(
     project_id: str,
     document_id: str,
-    content_offset: Optional[int] = 0,
-    content_length: Optional[int] = 2000,
-    raw_response: Optional[bool] = False
+    content_offset: int = 0,
+    content_length: int = 2000,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """Get a single document with optional content chunking.
 
-    For large documents, use content_offset and content_length to retrieve content in chunks.
-
-    Args:
-        project_id: Project ID
-        document_id: Document ID
-        content_offset: Character offset to start from (default: 0)
-        content_length: Maximum length of content chunk in characters (default: 2000)
-        raw_response: If True, return complete API response (default: False)
-    """
+    For large documents, use content_offset and content_length to retrieve content in chunks."""
     from response_helpers import chunk_content_by_words
 
     client = _get_basecamp_client()
@@ -2434,16 +2078,9 @@ async def get_document(
         logger.error(f"Error getting document: {e}")
         return {"status": "error", "error": str(e)}
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def create_document(project_id: str, vault_id: str, title: str, content: str) -> Dict[str, Any]:
-    """Create a document in a vault.
-    
-    Args:
-        project_id: Project ID
-        vault_id: Vault ID
-        title: Document title
-        content: Document HTML content
-    """
+    """Create a document in a vault."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2466,16 +2103,9 @@ async def create_document(project_id: str, vault_id: str, title: str, content: s
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def update_document(project_id: str, document_id: str, title: Optional[str] = None, content: Optional[str] = None) -> Dict[str, Any]:
-    """Update a document.
-    
-    Args:
-        project_id: Project ID
-        document_id: Document ID
-        title: New title
-        content: New HTML content
-    """
+    """Update a document."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2498,14 +2128,9 @@ async def update_document(project_id: str, document_id: str, title: Optional[str
             "message": str(e)
         }
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def trash_document(project_id: str, document_id: str) -> Dict[str, Any]:
-    """Move a document to trash.
-    
-    Args:
-        project_id: Project ID
-        document_id: Document ID
-    """
+    """Move a document to trash."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
@@ -2529,25 +2154,17 @@ async def trash_document(project_id: str, document_id: str) -> Dict[str, Any]:
         }
 
 # Upload Management
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_uploads(
     project_id: str,
     vault_id: Optional[str] = None,
-    page: Optional[int] = 1,
-    max_results: Optional[int] = 16,
-    raw_response: Optional[bool] = False
+    page: int = 1,
+    max_results: int = 16,
+    raw_response: bool = False
 ) -> Dict[str, Any]:
     """List uploads in a project or vault.
 
-    Optionally filter by vault. Use get_vaults(project_id) to discover vault IDs.
-
-    Args:
-        project_id: Project ID
-        vault_id: Optional vault ID to limit to specific vault (from get_vaults results)
-        page: Page number (default: 1)
-        max_results: Maximum results per page (default: 16, hard limit: 16)
-        raw_response: If True, return complete API response (default: False)
-    """
+    Optionally filter by vault. Use get_vaults(project_id) to discover vault IDs."""
     from response_helpers import HARD_LIMITS, create_pagination_info, summarize_upload
 
     client = _get_basecamp_client()
@@ -2592,14 +2209,9 @@ async def get_uploads(
         logger.error(f"Error getting uploads: {e}")
         return {"status": "error", "error": str(e)}
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def get_upload(project_id: str, upload_id: str) -> Dict[str, Any]:
-    """Get details for a specific upload.
-    
-    Args:
-        project_id: Project ID
-        upload_id: Upload ID
-    """
+    """Get details for a specific upload."""
     client = _get_basecamp_client()
     if not client:
         return _get_auth_error_response()
